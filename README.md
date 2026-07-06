@@ -36,4 +36,4 @@ Configured in [`src/auth.ts`](src/auth.ts): email/password (Credentials provider
 
 ## Scope of this scaffold
 
-This sets up the stack end-to-end (auth → DB round trip via board creation) but intentionally leaves out: drag-and-drop reordering, list/card creation UI, shared-board membership (`boardMember` table exists but isn't wired into the UI yet), and labels.
+Boards, lists, and cards can all be created through the UI (`src/app/boards/[id]/actions.ts`). Intentionally left out: drag-and-drop reordering, shared-board membership (`boardMember` table exists but isn't wired into the UI yet), and labels.
