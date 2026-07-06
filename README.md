@@ -36,4 +36,4 @@ Configured in [`src/auth.ts`](src/auth.ts): email/password (Credentials provider
 
 ## Scope of this scaffold
 
-Boards, lists, and cards can all be created through the UI (`src/app/boards/[id]/actions.ts`). Intentionally left out: drag-and-drop reordering, shared-board membership (`boardMember` table exists but isn't wired into the UI yet), and labels.
+Boards, lists, and cards can be created, and lists/cards can be drag-and-dropped to reorder (including across lists) via [`src/app/boards/[id]/Board.tsx`](<src/app/boards/[id]/Board.tsx>), backed by `@dnd-kit`. Intentionally left out: shared-board membership (`boardMember` table exists but isn't wired into the UI yet) and labels.
