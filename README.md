@@ -36,7 +36,11 @@ Configured in [`src/auth.ts`](src/auth.ts): email/password (Credentials provider
 
 ## Scope of this scaffold
 
-Boards, lists, and cards can be created and deleted, and lists/cards can be drag-and-dropped to reorder (including across lists) via [`src/app/boards/[id]/Board.tsx`](<src/app/boards/[id]/Board.tsx>), backed by `@dnd-kit`. Card/list titles have a quick inline rename; a card's description, due date, and labels are edited in a modal (opened via the "Add details…" line on the card face). Labels are per-board, colored, and created on the fly from the modal. Intentionally left out: shared-board membership (`boardMember` table exists but isn't wired into the UI yet).
+Boards, lists, and cards can be created and deleted, and lists/cards can be drag-and-dropped to reorder (including across lists) via [`src/app/boards/[id]/Board.tsx`](<src/app/boards/[id]/Board.tsx>), backed by `@dnd-kit`. Card/list titles have a quick inline rename; a card's description, due date, and labels are edited in a modal (opened via the "Add details…" line on the card face). Labels are per-board, colored, and created on the fly from the modal.
+
+## Board membership
+
+The board creator is always the admin (`boards.ownerId`, not a `boardMember` row). Admins invite other **registered** users by email from the "Members" button on a board — invites can only be sent to accounts that already exist (there's no email-sending infra to invite someone who hasn't signed up yet). An invited user sees it under "Invitations" on `/boards` and can Accept or Decline. Admins can Kick (remove) or Block (revoke + prevent re-invite until unblocked) any active or invited member from the Members modal; a kicked/removed member loses board access immediately (`src/app/boards/[id]/actions.ts`'s `requireBoardAccess` checks `boardMembers.status = 'active'` OR ownership). Members have the same read/write access to lists/cards/labels as the admin — only membership management is admin-only.
 
 ## Deploying (Vercel)
 

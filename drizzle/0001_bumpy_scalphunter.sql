@@ -1,0 +1,1 @@
+ALTER TABLE "boardMember" ADD COLUMN "status" text DEFAULT 'invited' NOT NULL;

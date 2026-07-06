@@ -8,6 +8,13 @@
       "when": 1783328757926,
       "tag": "0000_stale_gertrude_yorkes",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1783334031817,
+      "tag": "0001_bumpy_scalphunter",
+      "breakpoints": true
     }
   ]
 }

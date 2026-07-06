@@ -19,16 +19,20 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { useEffect, useRef, useState, useTransition, type FormEvent } from "react";
 import {
+  blockMember,
   createCard,
   createLabel,
   createList,
   deleteCard,
   deleteLabel,
   deleteList,
+  inviteMember,
+  removeMember,
   renameCard,
   reorderCards,
   reorderLists,
   setCardLabel,
+  unblockMember,
   updateCard,
   updateList,
 } from "./actions";
@@ -43,6 +47,7 @@ type CardItem = {
 };
 type ListData = { id: string; title: string; cards: CardItem[] };
 type CardUpdates = { title: string; description: string | null; dueDate: string | null };
+type Member = { userId: string; email: string; status: string };
 
 // Hoisted so this object's identity is stable across renders — passing a
 // fresh literal here every render defeats dnd-kit's sensor memoization and
@@ -53,17 +58,25 @@ export function Board({
   boardId,
   initialLists,
   initialLabels,
+  isAdmin,
+  ownerEmail,
+  initialMembers,
 }: {
   boardId: string;
   initialLists: ListData[];
   initialLabels: Label[];
+  isAdmin: boolean;
+  ownerEmail: string;
+  initialMembers: Member[];
 }) {
   const [lists, setLists] = useState(initialLists);
   const [boardLabels, setBoardLabels] = useState(initialLabels);
+  const [members, setMembers] = useState(initialMembers);
   const [showLabelText, setShowLabelText] = useState(false);
   const [editingListId, setEditingListId] = useState<string | null>(null);
   const [editingCardTitleId, setEditingCardTitleId] = useState<string | null>(null);
   const [detailCardId, setDetailCardId] = useState<string | null>(null);
+  const [showMembers, setShowMembers] = useState(false);
   const [, startTransition] = useTransition();
   const sensors = useSensors(useSensor(PointerSensor, POINTER_SENSOR_OPTIONS));
 
@@ -289,16 +302,55 @@ export function Board({
     await setCardLabel(cardId, labelId, assigned);
   }
 
+  async function handleInvite(email: string) {
+    try {
+      const member = await inviteMember(boardId, email);
+      setMembers((prev) => [...prev.filter((m) => m.userId !== member.userId), member]);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Couldn't send the invite");
+    }
+  }
+
+  async function handleRemoveMember(userId: string) {
+    if (!window.confirm("Remove this member from the board?")) return;
+    setMembers((prev) => prev.filter((m) => m.userId !== userId));
+    await removeMember(boardId, userId);
+  }
+
+  async function handleBlockMember(userId: string) {
+    if (!window.confirm("Block this member? They will lose access immediately.")) return;
+    setMembers((prev) =>
+      prev.map((m) => (m.userId === userId ? { ...m, status: "blocked" } : m)),
+    );
+    await blockMember(boardId, userId);
+  }
+
+  async function handleUnblockMember(userId: string) {
+    setMembers((prev) => prev.filter((m) => m.userId !== userId));
+    await unblockMember(boardId, userId);
+  }
+
   const detailCard = lists.flatMap((list) => list.cards).find((card) => card.id === detailCardId);
 
   return (
-    <DndContext
-      id={boardId}
-      sensors={sensors}
-      collisionDetection={closestCorners}
-      onDragOver={handleDragOver}
-      onDragEnd={handleDragEnd}
-    >
+    <div className="flex flex-col gap-4">
+      <div>
+        <button
+          type="button"
+          onClick={() => setShowMembers(true)}
+          className="text-sm underline"
+        >
+          Members ({members.filter((m) => m.status === "active").length + 1})
+        </button>
+      </div>
+
+      <DndContext
+        id={boardId}
+        sensors={sensors}
+        collisionDetection={closestCorners}
+        onDragOver={handleDragOver}
+        onDragEnd={handleDragEnd}
+      >
       <div className="flex gap-4 overflow-x-auto">
         <SortableContext items={lists.map((list) => list.id)} strategy={horizontalListSortingStrategy}>
           {lists.map((list) => (
@@ -355,7 +407,21 @@ export function Board({
           onDeleteLabel={handleDeleteLabel}
         />
       )}
-    </DndContext>
+      </DndContext>
+
+      {showMembers && (
+        <MembersModal
+          isAdmin={isAdmin}
+          ownerEmail={ownerEmail}
+          members={members}
+          onClose={() => setShowMembers(false)}
+          onInvite={handleInvite}
+          onRemove={handleRemoveMember}
+          onBlock={handleBlockMember}
+          onUnblock={handleUnblockMember}
+        />
+      )}
+    </div>
   );
 }
 
@@ -767,6 +833,155 @@ function CardDetailModal({
             </div>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+function MembersModal({
+  isAdmin,
+  ownerEmail,
+  members,
+  onClose,
+  onInvite,
+  onRemove,
+  onBlock,
+  onUnblock,
+}: {
+  isAdmin: boolean;
+  ownerEmail: string;
+  members: Member[];
+  onClose: () => void;
+  onInvite: (email: string) => void;
+  onRemove: (userId: string) => void;
+  onBlock: (userId: string) => void;
+  onUnblock: (userId: string) => void;
+}) {
+  const inviteEmailRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  const statusLabel: Record<string, string> = {
+    active: "Active",
+    invited: "Invited",
+    blocked: "Blocked",
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        onClick={(event) => event.stopPropagation()}
+        className="w-full max-w-md rounded border bg-background p-4 shadow-lg"
+      >
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-lg font-medium">Members</h2>
+          <button type="button" onClick={onClose} className="text-sm underline">
+            Close
+          </button>
+        </div>
+
+        <ul className="mb-3 flex flex-col gap-2">
+          <li className="flex items-center justify-between rounded bg-zinc-50 px-3 py-2 text-sm dark:bg-zinc-900">
+            <span>{ownerEmail}</span>
+            <span className="text-xs text-zinc-500">Admin</span>
+          </li>
+          {members.map((member) => (
+            <li
+              key={member.userId}
+              className="flex items-center justify-between gap-2 rounded bg-zinc-50 px-3 py-2 text-sm dark:bg-zinc-900"
+            >
+              <span className="flex-1">{member.email}</span>
+              <span className="text-xs text-zinc-500">{statusLabel[member.status]}</span>
+              {isAdmin && (
+                <div className="flex gap-2 text-xs">
+                  {member.status === "active" && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => onRemove(member.userId)}
+                        className="underline"
+                      >
+                        Kick
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onBlock(member.userId)}
+                        className="text-red-600 underline"
+                      >
+                        Block
+                      </button>
+                    </>
+                  )}
+                  {member.status === "invited" && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => onInvite(member.email)}
+                        className="underline"
+                      >
+                        Re-invite
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onRemove(member.userId)}
+                        className="text-red-600 underline"
+                      >
+                        Cancel
+                      </button>
+                    </>
+                  )}
+                  {member.status === "blocked" && (
+                    <button
+                      type="button"
+                      onClick={() => onUnblock(member.userId)}
+                      className="underline"
+                    >
+                      Unblock
+                    </button>
+                  )}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+
+        {isAdmin && (
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              const email = inviteEmailRef.current?.value.trim();
+              if (!email) return;
+              onInvite(email);
+              inviteEmailRef.current!.value = "";
+            }}
+            className="flex gap-2"
+          >
+            <input
+              type="email"
+              ref={inviteEmailRef}
+              placeholder="Invite by email"
+              required
+              className="flex-1 rounded border px-2 py-1.5 text-sm"
+            />
+            <button
+              type="submit"
+              className="rounded bg-foreground px-3 py-1.5 text-sm text-background"
+            >
+              Invite
+            </button>
+          </form>
+        )}
       </div>
     </div>
   );

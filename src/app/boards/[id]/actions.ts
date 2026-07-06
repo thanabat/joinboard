@@ -2,11 +2,32 @@
 
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { boards, cardLabels, cards, labels, lists } from "@/db/schema";
+import { boardMembers, boards, cardLabels, cards, labels, lists, users } from "@/db/schema";
 import { and, eq, inArray, max } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
-async function requireBoardOwnership(boardId: string) {
+async function requireBoardAccess(boardId: string) {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Not authenticated");
+
+  const board = await db.query.boards.findFirst({ where: eq(boards.id, boardId) });
+  if (!board) throw new Error("Board not found");
+
+  if (board.ownerId === session.user.id) return { board, isAdmin: true };
+
+  const membership = await db.query.boardMembers.findFirst({
+    where: and(
+      eq(boardMembers.boardId, boardId),
+      eq(boardMembers.userId, session.user.id),
+      eq(boardMembers.status, "active"),
+    ),
+  });
+  if (!membership) throw new Error("Board not found");
+
+  return { board, isAdmin: false };
+}
+
+async function requireBoardAdmin(boardId: string) {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Not authenticated");
 
@@ -19,7 +40,7 @@ async function requireBoardOwnership(boardId: string) {
 }
 
 export async function createList(boardId: string, title: string) {
-  await requireBoardOwnership(boardId);
+  await requireBoardAccess(boardId);
 
   const trimmed = title.trim();
   if (!trimmed) throw new Error("Title is required");
@@ -38,24 +59,24 @@ export async function createList(boardId: string, title: string) {
   return list;
 }
 
-async function requireListOwnership(listId: string) {
+async function requireListAccess(listId: string) {
   const list = await db.query.lists.findFirst({ where: eq(lists.id, listId) });
   if (!list) throw new Error("List not found");
-  const board = await requireBoardOwnership(list.boardId);
+  const { board } = await requireBoardAccess(list.boardId);
   return { list, board };
 }
 
-async function requireCardOwnership(cardId: string) {
+async function requireCardAccess(cardId: string) {
   const card = await db.query.cards.findFirst({ where: eq(cards.id, cardId) });
   if (!card) throw new Error("Card not found");
-  const { list, board } = await requireListOwnership(card.listId);
+  const { list, board } = await requireListAccess(card.listId);
   return { card, list, board };
 }
 
 export async function createCard(listId: string, title: string) {
   const list = await db.query.lists.findFirst({ where: eq(lists.id, listId) });
   if (!list) throw new Error("List not found");
-  await requireBoardOwnership(list.boardId);
+  await requireBoardAccess(list.boardId);
 
   const trimmed = title.trim();
   if (!trimmed) throw new Error("Title is required");
@@ -75,7 +96,7 @@ export async function createCard(listId: string, title: string) {
 }
 
 export async function updateList(listId: string, title: string) {
-  const { board } = await requireListOwnership(listId);
+  const { board } = await requireListAccess(listId);
 
   const trimmed = title.trim();
   if (!trimmed) throw new Error("Title is required");
@@ -85,7 +106,7 @@ export async function updateList(listId: string, title: string) {
 }
 
 export async function deleteList(listId: string) {
-  const { board } = await requireListOwnership(listId);
+  const { board } = await requireListAccess(listId);
 
   // Cascades to the list's cards via the cards.listId foreign key.
   await db.delete(lists).where(eq(lists.id, listId));
@@ -93,7 +114,7 @@ export async function deleteList(listId: string) {
 }
 
 export async function renameCard(cardId: string, title: string) {
-  const { board } = await requireCardOwnership(cardId);
+  const { board } = await requireCardAccess(cardId);
 
   const trimmed = title.trim();
   if (!trimmed) throw new Error("Title is required");
@@ -106,7 +127,7 @@ export async function updateCard(
   cardId: string,
   updates: { title: string; description: string | null; dueDate: string | null },
 ) {
-  const { board } = await requireCardOwnership(cardId);
+  const { board } = await requireCardAccess(cardId);
 
   const trimmed = updates.title.trim();
   if (!trimmed) throw new Error("Title is required");
@@ -124,14 +145,14 @@ export async function updateCard(
 }
 
 export async function deleteCard(cardId: string) {
-  const { board } = await requireCardOwnership(cardId);
+  const { board } = await requireCardAccess(cardId);
 
   await db.delete(cards).where(eq(cards.id, cardId));
   revalidatePath(`/boards/${board.id}`);
 }
 
 export async function createLabel(boardId: string, name: string, color: string) {
-  await requireBoardOwnership(boardId);
+  await requireBoardAccess(boardId);
 
   const trimmed = name.trim();
   if (!trimmed) throw new Error("Name is required");
@@ -145,7 +166,7 @@ export async function createLabel(boardId: string, name: string, color: string) 
 export async function deleteLabel(labelId: string) {
   const label = await db.query.labels.findFirst({ where: eq(labels.id, labelId) });
   if (!label) throw new Error("Label not found");
-  const board = await requireBoardOwnership(label.boardId);
+  const { board } = await requireBoardAccess(label.boardId);
 
   // Cascades to cardLabels via the cardLabel.labelId foreign key.
   await db.delete(labels).where(eq(labels.id, labelId));
@@ -153,7 +174,7 @@ export async function deleteLabel(labelId: string) {
 }
 
 export async function setCardLabel(cardId: string, labelId: string, assigned: boolean) {
-  const { list } = await requireCardOwnership(cardId);
+  const { list } = await requireCardAccess(cardId);
 
   const label = await db.query.labels.findFirst({ where: eq(labels.id, labelId) });
   if (!label || label.boardId !== list.boardId) throw new Error("Label not found");
@@ -170,7 +191,7 @@ export async function setCardLabel(cardId: string, labelId: string, assigned: bo
 }
 
 export async function reorderLists(boardId: string, orderedListIds: string[]) {
-  await requireBoardOwnership(boardId);
+  await requireBoardAccess(boardId);
 
   await Promise.all(
     orderedListIds.map((listId, index) =>
@@ -188,7 +209,7 @@ export async function reorderCards(
   boardId: string,
   updates: { id: string; listId: string; position: number }[],
 ) {
-  await requireBoardOwnership(boardId);
+  await requireBoardAccess(boardId);
 
   // Defense in depth: only allow writing cards into lists that belong to this board.
   const listIds = [...new Set(updates.map((update) => update.listId))];
@@ -210,4 +231,106 @@ export async function reorderCards(
   );
 
   revalidatePath(`/boards/${boardId}`);
+}
+
+// --- Board membership (admin-only management + self-service accept/decline) ---
+
+export async function inviteMember(boardId: string, email: string) {
+  const board = await requireBoardAdmin(boardId);
+
+  const trimmedEmail = email.trim().toLowerCase();
+  if (!trimmedEmail) throw new Error("Email is required");
+
+  const invitee = await db.query.users.findFirst({ where: eq(users.email, trimmedEmail) });
+  if (!invitee) throw new Error("No account found with that email");
+  if (invitee.id === board.ownerId) throw new Error("That user already owns this board");
+
+  const existing = await db.query.boardMembers.findFirst({
+    where: and(eq(boardMembers.boardId, boardId), eq(boardMembers.userId, invitee.id)),
+  });
+  if (existing?.status === "blocked") {
+    throw new Error("This user is blocked from this board — unblock them first");
+  }
+
+  await db
+    .insert(boardMembers)
+    .values({ boardId, userId: invitee.id, status: "invited" })
+    .onConflictDoUpdate({
+      target: [boardMembers.boardId, boardMembers.userId],
+      set: { status: "invited" },
+    });
+
+  revalidatePath(`/boards/${boardId}`);
+  revalidatePath("/boards");
+  return { userId: invitee.id, email: invitee.email, status: "invited" };
+}
+
+export async function removeMember(boardId: string, userId: string) {
+  await requireBoardAdmin(boardId);
+
+  await db
+    .delete(boardMembers)
+    .where(and(eq(boardMembers.boardId, boardId), eq(boardMembers.userId, userId)));
+
+  revalidatePath(`/boards/${boardId}`);
+}
+
+export async function blockMember(boardId: string, userId: string) {
+  await requireBoardAdmin(boardId);
+
+  await db
+    .insert(boardMembers)
+    .values({ boardId, userId, status: "blocked" })
+    .onConflictDoUpdate({
+      target: [boardMembers.boardId, boardMembers.userId],
+      set: { status: "blocked" },
+    });
+
+  revalidatePath(`/boards/${boardId}`);
+}
+
+export async function unblockMember(boardId: string, userId: string) {
+  await requireBoardAdmin(boardId);
+
+  // Back to a clean slate — an explicit invite is needed to grant access again.
+  await db
+    .delete(boardMembers)
+    .where(and(eq(boardMembers.boardId, boardId), eq(boardMembers.userId, userId)));
+
+  revalidatePath(`/boards/${boardId}`);
+}
+
+export async function acceptInvite(boardId: string) {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Not authenticated");
+
+  await db
+    .update(boardMembers)
+    .set({ status: "active" })
+    .where(
+      and(
+        eq(boardMembers.boardId, boardId),
+        eq(boardMembers.userId, session.user.id),
+        eq(boardMembers.status, "invited"),
+      ),
+    );
+
+  revalidatePath("/boards");
+}
+
+export async function declineInvite(boardId: string) {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Not authenticated");
+
+  await db
+    .delete(boardMembers)
+    .where(
+      and(
+        eq(boardMembers.boardId, boardId),
+        eq(boardMembers.userId, session.user.id),
+        eq(boardMembers.status, "invited"),
+      ),
+    );
+
+  revalidatePath("/boards");
 }

@@ -91,6 +91,8 @@ export const boardMembers = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     role: text("role").notNull().default("member"),
+    // "invited" (pending) | "active" (accepted) | "blocked" (denied access, can't be re-invited until unblocked)
+    status: text("status").notNull().default("invited"),
   },
   (boardMember) => [
     primaryKey({ columns: [boardMember.boardId, boardMember.userId] }),

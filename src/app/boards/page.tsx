@@ -1,9 +1,10 @@
 import { auth, signOut } from "@/auth";
 import { db } from "@/db";
-import { boards } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { boardMembers, boards } from "@/db/schema";
+import { eq, inArray } from "drizzle-orm";
 import Link from "next/link";
 import { createBoard } from "./actions";
+import { acceptInvite, declineInvite } from "./[id]/actions";
 
 export default async function BoardsPage() {
   const session = await auth();
@@ -13,6 +14,22 @@ export default async function BoardsPage() {
     where: eq(boards.ownerId, userId),
     orderBy: (board, { desc }) => desc(board.createdAt),
   });
+
+  const memberships = await db.query.boardMembers.findMany({
+    where: eq(boardMembers.userId, userId),
+  });
+
+  const invitedBoardIds = memberships
+    .filter((m) => m.status === "invited")
+    .map((m) => m.boardId);
+  const activeBoardIds = memberships.filter((m) => m.status === "active").map((m) => m.boardId);
+
+  const invitedBoards = invitedBoardIds.length
+    ? await db.query.boards.findMany({ where: inArray(boards.id, invitedBoardIds) })
+    : [];
+  const sharedBoards = activeBoardIds.length
+    ? await db.query.boards.findMany({ where: inArray(boards.id, activeBoardIds) })
+    : [];
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 px-6 py-12">
@@ -29,6 +46,34 @@ export default async function BoardsPage() {
           </button>
         </form>
       </div>
+
+      {invitedBoards.length > 0 && (
+        <section className="flex flex-col gap-2">
+          <h2 className="text-sm font-medium text-zinc-500">Invitations</h2>
+          <ul className="flex flex-col gap-2">
+            {invitedBoards.map((board) => (
+              <li
+                key={board.id}
+                className="flex items-center justify-between rounded border px-4 py-3"
+              >
+                <span>{board.name}</span>
+                <div className="flex gap-3">
+                  <form action={acceptInvite.bind(null, board.id)}>
+                    <button type="submit" className="text-sm underline">
+                      Accept
+                    </button>
+                  </form>
+                  <form action={declineInvite.bind(null, board.id)}>
+                    <button type="submit" className="text-sm text-zinc-500 underline">
+                      Decline
+                    </button>
+                  </form>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <form action={createBoard} className="flex gap-2">
         <input
@@ -60,6 +105,24 @@ export default async function BoardsPage() {
             </li>
           ))}
         </ul>
+      )}
+
+      {sharedBoards.length > 0 && (
+        <section className="flex flex-col gap-2">
+          <h2 className="text-sm font-medium text-zinc-500">Shared with you</h2>
+          <ul className="flex flex-col gap-2">
+            {sharedBoards.map((board) => (
+              <li key={board.id}>
+                <Link
+                  href={`/boards/${board.id}`}
+                  className="block rounded border px-4 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-900"
+                >
+                  {board.name}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
     </main>
   );

@@ -1,7 +1,7 @@
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { boards, cardLabels, cards, labels, lists } from "@/db/schema";
-import { and, eq, inArray } from "drizzle-orm";
+import { boardMembers, boards, cardLabels, cards, labels, lists, users } from "@/db/schema";
+import { eq, inArray, and } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { Board } from "./Board";
@@ -13,12 +13,22 @@ export default async function BoardPage({
 }) {
   const { id } = await params;
   const session = await auth();
+  const userId = session!.user!.id;
 
-  // Ownership check only for now — shared-board access via boardMembers is a follow-up.
-  const board = await db.query.boards.findFirst({
-    where: and(eq(boards.id, id), eq(boards.ownerId, session!.user!.id)),
-  });
+  const board = await db.query.boards.findFirst({ where: eq(boards.id, id) });
   if (!board) notFound();
+
+  const isAdmin = board.ownerId === userId;
+  if (!isAdmin) {
+    const membership = await db.query.boardMembers.findFirst({
+      where: and(
+        eq(boardMembers.boardId, id),
+        eq(boardMembers.userId, userId),
+        eq(boardMembers.status, "active"),
+      ),
+    });
+    if (!membership) notFound();
+  }
 
   const boardLists = await db.query.lists.findMany({
     where: eq(lists.boardId, id),
@@ -56,6 +66,21 @@ export default async function BoardPage({
       })),
   }));
 
+  const owner = await db.query.users.findFirst({ where: eq(users.id, board.ownerId) });
+  const memberRows = await db.query.boardMembers.findMany({ where: eq(boardMembers.boardId, id) });
+  const memberUserIds = memberRows.map((row) => row.userId);
+  const memberUsers = memberUserIds.length
+    ? await db.query.users.findMany({ where: inArray(users.id, memberUserIds) })
+    : [];
+  const members = memberRows.map((row) => {
+    const user = memberUsers.find((candidate) => candidate.id === row.userId);
+    return {
+      userId: row.userId,
+      email: user?.email ?? "(unknown)",
+      status: row.status,
+    };
+  });
+
   return (
     <main className="flex flex-1 flex-col gap-6 px-6 py-12">
       <div className="flex items-center gap-4">
@@ -65,7 +90,14 @@ export default async function BoardPage({
         <h1 className="text-2xl font-semibold">{board.name}</h1>
       </div>
 
-      <Board boardId={board.id} initialLists={initialLists} initialLabels={boardLabels} />
+      <Board
+        boardId={board.id}
+        initialLists={initialLists}
+        initialLabels={boardLabels}
+        isAdmin={isAdmin}
+        ownerEmail={owner?.email ?? "(unknown)"}
+        initialMembers={members}
+      />
     </main>
   );
 }
