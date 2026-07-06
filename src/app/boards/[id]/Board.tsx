@@ -17,20 +17,30 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useEffect, useState, useTransition, type FormEvent } from "react";
+import { useEffect, useRef, useState, useTransition, type FormEvent } from "react";
 import {
   createCard,
+  createLabel,
   createList,
   deleteCard,
+  deleteLabel,
   deleteList,
   renameCard,
   reorderCards,
   reorderLists,
+  setCardLabel,
   updateCard,
   updateList,
 } from "./actions";
 
-type CardItem = { id: string; title: string; description: string | null; dueDate: Date | null };
+type Label = { id: string; name: string; color: string };
+type CardItem = {
+  id: string;
+  title: string;
+  description: string | null;
+  dueDate: Date | null;
+  labelIds: string[];
+};
 type ListData = { id: string; title: string; cards: CardItem[] };
 type CardUpdates = { title: string; description: string | null; dueDate: string | null };
 
@@ -42,11 +52,14 @@ const POINTER_SENSOR_OPTIONS = { activationConstraint: { distance: 5 } };
 export function Board({
   boardId,
   initialLists,
+  initialLabels,
 }: {
   boardId: string;
   initialLists: ListData[];
+  initialLabels: Label[];
 }) {
   const [lists, setLists] = useState(initialLists);
+  const [boardLabels, setBoardLabels] = useState(initialLabels);
   const [editingListId, setEditingListId] = useState<string | null>(null);
   const [editingCardTitleId, setEditingCardTitleId] = useState<string | null>(null);
   const [detailCardId, setDetailCardId] = useState<string | null>(null);
@@ -162,7 +175,10 @@ export function Board({
         list.id === listId
           ? {
               ...list,
-              cards: [...list.cards, { id: card.id, title: card.title, description: null, dueDate: null }],
+              cards: [
+                ...list.cards,
+                { id: card.id, title: card.title, description: null, dueDate: null, labelIds: [] },
+              ],
             }
           : list,
       ),
@@ -233,6 +249,45 @@ export function Board({
     await deleteCard(cardId);
   }
 
+  async function handleCreateLabel(name: string, color: string) {
+    const label = await createLabel(boardId, name, color);
+    setBoardLabels((prev) => [...prev, label]);
+  }
+
+  async function handleDeleteLabel(labelId: string) {
+    if (!window.confirm("Delete this label? It will be removed from every card.")) return;
+    setBoardLabels((prev) => prev.filter((label) => label.id !== labelId));
+    setLists((prev) =>
+      prev.map((list) => ({
+        ...list,
+        cards: list.cards.map((card) => ({
+          ...card,
+          labelIds: card.labelIds.filter((id) => id !== labelId),
+        })),
+      })),
+    );
+    await deleteLabel(labelId);
+  }
+
+  async function handleToggleCardLabel(cardId: string, labelId: string, assigned: boolean) {
+    setLists((prev) =>
+      prev.map((list) => ({
+        ...list,
+        cards: list.cards.map((card) =>
+          card.id === cardId
+            ? {
+                ...card,
+                labelIds: assigned
+                  ? [...card.labelIds, labelId]
+                  : card.labelIds.filter((id) => id !== labelId),
+              }
+            : card,
+        ),
+      })),
+    );
+    await setCardLabel(cardId, labelId, assigned);
+  }
+
   const detailCard = lists.flatMap((list) => list.cards).find((card) => card.id === detailCardId);
 
   return (
@@ -249,6 +304,7 @@ export function Board({
             <SortableList
               key={list.id}
               list={list}
+              boardLabels={boardLabels}
               isEditing={editingListId === list.id}
               onStartEdit={() => setEditingListId(list.id)}
               onCancelEdit={() => setEditingListId(null)}
@@ -287,9 +343,13 @@ export function Board({
       {detailCard && (
         <CardDetailModal
           card={detailCard}
+          boardLabels={boardLabels}
           onClose={() => setDetailCardId(null)}
           onSave={handleSaveCardDetail}
           onDelete={handleDeleteCard}
+          onToggleLabel={handleToggleCardLabel}
+          onCreateLabel={handleCreateLabel}
+          onDeleteLabel={handleDeleteLabel}
         />
       )}
     </DndContext>
@@ -298,6 +358,7 @@ export function Board({
 
 function SortableList({
   list,
+  boardLabels,
   isEditing,
   onStartEdit,
   onCancelEdit,
@@ -312,6 +373,7 @@ function SortableList({
   onDeleteCard,
 }: {
   list: ListData;
+  boardLabels: Label[];
   isEditing: boolean;
   onStartEdit: () => void;
   onCancelEdit: () => void;
@@ -388,6 +450,7 @@ function SortableList({
             <SortableCard
               key={card.id}
               card={card}
+              boardLabels={boardLabels}
               isEditingTitle={editingCardTitleId === card.id}
               onStartRename={() => onStartRenameCard(card.id)}
               onCancelRename={onCancelRenameCard}
@@ -419,6 +482,7 @@ function SortableList({
 
 function SortableCard({
   card,
+  boardLabels,
   isEditingTitle,
   onStartRename,
   onCancelRename,
@@ -427,6 +491,7 @@ function SortableCard({
   onDelete,
 }: {
   card: CardItem;
+  boardLabels: Label[];
   isEditingTitle: boolean;
   onStartRename: () => void;
   onCancelRename: () => void;
@@ -442,6 +507,8 @@ function SortableCard({
     transform: CSS.Transform.toString(transform),
     transition,
   };
+
+  const cardLabels = boardLabels.filter((label) => card.labelIds.includes(label.id));
 
   if (isEditingTitle) {
     return (
@@ -477,6 +544,18 @@ function SortableCard({
       style={style}
       className="group rounded bg-zinc-50 px-3 py-2 text-sm dark:bg-zinc-900"
     >
+      {cardLabels.length > 0 && (
+        <div className="mb-1 flex flex-wrap gap-1">
+          {cardLabels.map((label) => (
+            <span
+              key={label.id}
+              title={label.name}
+              style={{ backgroundColor: label.color }}
+              className="h-2 w-8 rounded-full"
+            />
+          ))}
+        </div>
+      )}
       <div className="flex items-start justify-between gap-2">
         <span {...attributes} {...listeners} className="flex-1 cursor-grab">
           {card.title}
@@ -517,15 +596,26 @@ function SortableCard({
 
 function CardDetailModal({
   card,
+  boardLabels,
   onClose,
   onSave,
   onDelete,
+  onToggleLabel,
+  onCreateLabel,
+  onDeleteLabel,
 }: {
   card: CardItem;
+  boardLabels: Label[];
   onClose: () => void;
   onSave: (cardId: string, updates: CardUpdates) => void;
   onDelete: (cardId: string) => void;
+  onToggleLabel: (cardId: string, labelId: string, assigned: boolean) => void;
+  onCreateLabel: (name: string, color: string) => void;
+  onDeleteLabel: (labelId: string) => void;
 }) {
+  const newLabelNameRef = useRef<HTMLInputElement>(null);
+  const newLabelColorRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") onClose();
@@ -578,6 +668,62 @@ function CardDetailModal({
               className="rounded border px-2 py-1.5 text-sm text-foreground"
             />
           </label>
+
+          <div className="flex flex-col gap-1">
+            <span className="text-sm text-zinc-500">Labels</span>
+            {boardLabels.map((label) => {
+              const assigned = card.labelIds.includes(label.id);
+              return (
+                <div key={label.id} className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onToggleLabel(card.id, label.id, !assigned)}
+                    style={{ backgroundColor: label.color }}
+                    className="flex-1 rounded px-2 py-1 text-left text-sm text-white"
+                  >
+                    {label.name}
+                    {assigned ? " ✓" : ""}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onDeleteLabel(label.id)}
+                    aria-label={`Delete label ${label.name}`}
+                    className="px-1 text-xs text-zinc-500 hover:text-red-600"
+                  >
+                    ×
+                  </button>
+                </div>
+              );
+            })}
+            <div className="flex gap-2">
+              <input
+                type="color"
+                defaultValue="#2563eb"
+                ref={newLabelColorRef}
+                className="h-8 w-10 rounded border"
+              />
+              <input
+                type="text"
+                ref={newLabelNameRef}
+                placeholder="New label"
+                className="flex-1 rounded border px-2 py-1 text-sm"
+              />
+              <button
+                type="button"
+                aria-label="Add label"
+                onClick={() => {
+                  const name = newLabelNameRef.current?.value.trim();
+                  if (!name) return;
+                  onCreateLabel(name, newLabelColorRef.current!.value);
+                  newLabelNameRef.current!.value = "";
+                }}
+                className="rounded bg-foreground px-2 py-1 text-xs text-background"
+              >
+                Add
+              </button>
+            </div>
+          </div>
+
           <div className="flex items-center justify-between">
             <button
               type="button"

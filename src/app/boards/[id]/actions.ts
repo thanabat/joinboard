@@ -2,7 +2,7 @@
 
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { boards, cards, lists } from "@/db/schema";
+import { boards, cardLabels, cards, labels, lists } from "@/db/schema";
 import { and, eq, inArray, max } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
@@ -128,6 +128,45 @@ export async function deleteCard(cardId: string) {
 
   await db.delete(cards).where(eq(cards.id, cardId));
   revalidatePath(`/boards/${board.id}`);
+}
+
+export async function createLabel(boardId: string, name: string, color: string) {
+  await requireBoardOwnership(boardId);
+
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error("Name is required");
+
+  const [label] = await db.insert(labels).values({ boardId, name: trimmed, color }).returning();
+
+  revalidatePath(`/boards/${boardId}`);
+  return label;
+}
+
+export async function deleteLabel(labelId: string) {
+  const label = await db.query.labels.findFirst({ where: eq(labels.id, labelId) });
+  if (!label) throw new Error("Label not found");
+  const board = await requireBoardOwnership(label.boardId);
+
+  // Cascades to cardLabels via the cardLabel.labelId foreign key.
+  await db.delete(labels).where(eq(labels.id, labelId));
+  revalidatePath(`/boards/${board.id}`);
+}
+
+export async function setCardLabel(cardId: string, labelId: string, assigned: boolean) {
+  const { list } = await requireCardOwnership(cardId);
+
+  const label = await db.query.labels.findFirst({ where: eq(labels.id, labelId) });
+  if (!label || label.boardId !== list.boardId) throw new Error("Label not found");
+
+  if (assigned) {
+    await db.insert(cardLabels).values({ cardId, labelId }).onConflictDoNothing();
+  } else {
+    await db
+      .delete(cardLabels)
+      .where(and(eq(cardLabels.cardId, cardId), eq(cardLabels.labelId, labelId)));
+  }
+
+  revalidatePath(`/boards/${list.boardId}`);
 }
 
 export async function reorderLists(boardId: string, orderedListIds: string[]) {

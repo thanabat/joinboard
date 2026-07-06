@@ -1,6 +1,6 @@
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { boards, cards, lists } from "@/db/schema";
+import { boards, cardLabels, cards, labels, lists } from "@/db/schema";
 import { and, eq, inArray } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import Link from "next/link";
@@ -33,6 +33,13 @@ export default async function BoardPage({
       })
     : [];
 
+  const boardLabels = await db.query.labels.findMany({ where: eq(labels.boardId, id) });
+
+  const cardIds = boardCards.map((card) => card.id);
+  const cardLabelRows = cardIds.length
+    ? await db.query.cardLabels.findMany({ where: inArray(cardLabels.cardId, cardIds) })
+    : [];
+
   const initialLists = boardLists.map((list) => ({
     id: list.id,
     title: list.title,
@@ -43,6 +50,9 @@ export default async function BoardPage({
         title: card.title,
         description: card.description,
         dueDate: card.dueDate,
+        labelIds: cardLabelRows
+          .filter((row) => row.cardId === card.id)
+          .map((row) => row.labelId),
       })),
   }));
 
@@ -55,7 +65,7 @@ export default async function BoardPage({
         <h1 className="text-2xl font-semibold">{board.name}</h1>
       </div>
 
-      <Board boardId={board.id} initialLists={initialLists} />
+      <Board boardId={board.id} initialLists={initialLists} initialLabels={boardLabels} />
     </main>
   );
 }
