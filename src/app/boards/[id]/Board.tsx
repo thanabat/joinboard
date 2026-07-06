@@ -17,12 +17,13 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useState, useTransition, type FormEvent } from "react";
+import { useEffect, useState, useTransition, type FormEvent } from "react";
 import {
   createCard,
   createList,
   deleteCard,
   deleteList,
+  renameCard,
   reorderCards,
   reorderLists,
   updateCard,
@@ -47,7 +48,8 @@ export function Board({
 }) {
   const [lists, setLists] = useState(initialLists);
   const [editingListId, setEditingListId] = useState<string | null>(null);
-  const [editingCardId, setEditingCardId] = useState<string | null>(null);
+  const [editingCardTitleId, setEditingCardTitleId] = useState<string | null>(null);
+  const [detailCardId, setDetailCardId] = useState<string | null>(null);
   const [, startTransition] = useTransition();
   const sensors = useSensors(useSensor(PointerSensor, POINTER_SENSOR_OPTIONS));
 
@@ -184,12 +186,25 @@ export function Board({
     await deleteList(listId);
   }
 
-  async function handleSaveCard(cardId: string, updates: CardUpdates) {
-    const trimmed = updates.title.trim();
+  async function handleRenameCard(cardId: string, title: string) {
+    const trimmed = title.trim();
     if (!trimmed) {
-      setEditingCardId(null);
+      setEditingCardTitleId(null);
       return;
     }
+    setLists((prev) =>
+      prev.map((list) => ({
+        ...list,
+        cards: list.cards.map((card) => (card.id === cardId ? { ...card, title: trimmed } : card)),
+      })),
+    );
+    setEditingCardTitleId(null);
+    await renameCard(cardId, trimmed);
+  }
+
+  async function handleSaveCardDetail(cardId: string, updates: CardUpdates) {
+    const trimmed = updates.title.trim();
+    if (!trimmed) return;
     setLists((prev) =>
       prev.map((list) => ({
         ...list,
@@ -205,7 +220,7 @@ export function Board({
         ),
       })),
     );
-    setEditingCardId(null);
+    setDetailCardId(null);
     await updateCard(cardId, { ...updates, title: trimmed });
   }
 
@@ -214,8 +229,11 @@ export function Board({
     setLists((prev) =>
       prev.map((list) => ({ ...list, cards: list.cards.filter((c) => c.id !== cardId) })),
     );
+    setDetailCardId(null);
     await deleteCard(cardId);
   }
+
+  const detailCard = lists.flatMap((list) => list.cards).find((card) => card.id === detailCardId);
 
   return (
     <DndContext
@@ -237,10 +255,11 @@ export function Board({
               onRename={handleRenameList}
               onDelete={handleDeleteList}
               onAddCard={handleAddCard}
-              editingCardId={editingCardId}
-              onStartEditCard={setEditingCardId}
-              onCancelEditCard={() => setEditingCardId(null)}
-              onSaveCard={handleSaveCard}
+              editingCardTitleId={editingCardTitleId}
+              onStartRenameCard={setEditingCardTitleId}
+              onCancelRenameCard={() => setEditingCardTitleId(null)}
+              onRenameCard={handleRenameCard}
+              onOpenCardDetail={setDetailCardId}
               onDeleteCard={handleDeleteCard}
             />
           ))}
@@ -264,6 +283,15 @@ export function Board({
           </button>
         </form>
       </div>
+
+      {detailCard && (
+        <CardDetailModal
+          card={detailCard}
+          onClose={() => setDetailCardId(null)}
+          onSave={handleSaveCardDetail}
+          onDelete={handleDeleteCard}
+        />
+      )}
     </DndContext>
   );
 }
@@ -276,10 +304,11 @@ function SortableList({
   onRename,
   onDelete,
   onAddCard,
-  editingCardId,
-  onStartEditCard,
-  onCancelEditCard,
-  onSaveCard,
+  editingCardTitleId,
+  onStartRenameCard,
+  onCancelRenameCard,
+  onRenameCard,
+  onOpenCardDetail,
   onDeleteCard,
 }: {
   list: ListData;
@@ -289,10 +318,11 @@ function SortableList({
   onRename: (listId: string, title: string) => void;
   onDelete: (listId: string) => void;
   onAddCard: (listId: string, event: FormEvent<HTMLFormElement>) => void;
-  editingCardId: string | null;
-  onStartEditCard: (cardId: string) => void;
-  onCancelEditCard: () => void;
-  onSaveCard: (cardId: string, updates: CardUpdates) => void;
+  editingCardTitleId: string | null;
+  onStartRenameCard: (cardId: string) => void;
+  onCancelRenameCard: () => void;
+  onRenameCard: (cardId: string, title: string) => void;
+  onOpenCardDetail: (cardId: string) => void;
   onDeleteCard: (cardId: string) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
@@ -358,10 +388,11 @@ function SortableList({
             <SortableCard
               key={card.id}
               card={card}
-              isEditing={editingCardId === card.id}
-              onStartEdit={() => onStartEditCard(card.id)}
-              onCancelEdit={onCancelEditCard}
-              onSave={onSaveCard}
+              isEditingTitle={editingCardTitleId === card.id}
+              onStartRename={() => onStartRenameCard(card.id)}
+              onCancelRename={onCancelRenameCard}
+              onRename={onRenameCard}
+              onOpenDetail={() => onOpenCardDetail(card.id)}
               onDelete={onDeleteCard}
             />
           ))}
@@ -388,17 +419,19 @@ function SortableList({
 
 function SortableCard({
   card,
-  isEditing,
-  onStartEdit,
-  onCancelEdit,
-  onSave,
+  isEditingTitle,
+  onStartRename,
+  onCancelRename,
+  onRename,
+  onOpenDetail,
   onDelete,
 }: {
   card: CardItem;
-  isEditing: boolean;
-  onStartEdit: () => void;
-  onCancelEdit: () => void;
-  onSave: (cardId: string, updates: CardUpdates) => void;
+  isEditingTitle: boolean;
+  onStartRename: () => void;
+  onCancelRename: () => void;
+  onRename: (cardId: string, title: string) => void;
+  onOpenDetail: () => void;
   onDelete: (cardId: string) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
@@ -410,50 +443,29 @@ function SortableCard({
     transition,
   };
 
-  if (isEditing) {
+  if (isEditingTitle) {
     return (
       <li ref={setNodeRef} style={style} className="rounded border bg-zinc-50 p-2 text-sm dark:bg-zinc-900">
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            const form = event.currentTarget;
-            const title = (form.elements.namedItem("title") as HTMLInputElement).value;
-            const description = (form.elements.namedItem("description") as HTMLTextAreaElement).value;
-            const dueDate = (form.elements.namedItem("dueDate") as HTMLInputElement).value;
-            onSave(card.id, { title, description: description || null, dueDate: dueDate || null });
+            const input = event.currentTarget.elements.namedItem("title") as HTMLInputElement;
+            onRename(card.id, input.value);
           }}
-          className="flex flex-col gap-2"
+          className="flex gap-1"
         >
           <input
             name="title"
             defaultValue={card.title}
             autoFocus
-            className="rounded border px-2 py-1 text-sm"
+            className="flex-1 rounded border px-2 py-1 text-sm"
             onKeyDown={(event) => {
-              if (event.key === "Escape") onCancelEdit();
+              if (event.key === "Escape") onCancelRename();
             }}
           />
-          <textarea
-            name="description"
-            defaultValue={card.description ?? ""}
-            placeholder="Description"
-            rows={2}
-            className="rounded border px-2 py-1 text-sm"
-          />
-          <input
-            name="dueDate"
-            type="date"
-            defaultValue={card.dueDate ? card.dueDate.toISOString().slice(0, 10) : ""}
-            className="rounded border px-2 py-1 text-sm"
-          />
-          <div className="flex gap-2">
-            <button type="submit" className="rounded bg-foreground px-2 py-1 text-xs text-background">
-              Save
-            </button>
-            <button type="button" onClick={onCancelEdit} className="text-xs underline">
-              Cancel
-            </button>
-          </div>
+          <button type="submit" className="text-sm underline">
+            Save
+          </button>
         </form>
       </li>
     );
@@ -472,8 +484,8 @@ function SortableCard({
         <div className="flex shrink-0 gap-1 opacity-0 group-hover:opacity-100">
           <button
             type="button"
-            onClick={onStartEdit}
-            aria-label="Edit card"
+            onClick={onStartRename}
+            aria-label="Rename card"
             className="px-1 text-zinc-500 hover:text-foreground"
           >
             ✎
@@ -488,14 +500,106 @@ function SortableCard({
           </button>
         </div>
       </div>
-      {card.description && (
-        <p className="mt-1 line-clamp-2 text-xs text-zinc-500">{card.description}</p>
-      )}
-      {card.dueDate && (
-        <p className="mt-1 text-xs text-zinc-500">
-          Due {card.dueDate.toLocaleDateString()}
-        </p>
-      )}
+
+      <button
+        type="button"
+        onClick={onOpenDetail}
+        aria-label="Open card details"
+        className="mt-1 block w-full text-left text-xs text-zinc-500 hover:underline"
+      >
+        {card.description && <p className="line-clamp-2">{card.description}</p>}
+        {card.dueDate && <p>Due {card.dueDate.toLocaleDateString()}</p>}
+        {!card.description && !card.dueDate && <span className="text-zinc-400">Add details…</span>}
+      </button>
     </li>
+  );
+}
+
+function CardDetailModal({
+  card,
+  onClose,
+  onSave,
+  onDelete,
+}: {
+  card: CardItem;
+  onClose: () => void;
+  onSave: (cardId: string, updates: CardUpdates) => void;
+  onDelete: (cardId: string) => void;
+}) {
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        onClick={(event) => event.stopPropagation()}
+        className="w-full max-w-md rounded border bg-background p-4 shadow-lg"
+      >
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            const form = event.currentTarget;
+            const title = (form.elements.namedItem("title") as HTMLInputElement).value;
+            const description = (form.elements.namedItem("description") as HTMLTextAreaElement).value;
+            const dueDate = (form.elements.namedItem("dueDate") as HTMLInputElement).value;
+            onSave(card.id, { title, description: description || null, dueDate: dueDate || null });
+          }}
+          className="flex flex-col gap-3"
+        >
+          <input
+            name="title"
+            defaultValue={card.title}
+            autoFocus
+            className="rounded border px-2 py-1.5 text-base font-medium"
+          />
+          <textarea
+            name="description"
+            defaultValue={card.description ?? ""}
+            placeholder="Description"
+            rows={4}
+            className="rounded border px-2 py-1.5 text-sm"
+          />
+          <label className="flex flex-col gap-1 text-sm text-zinc-500">
+            Due date
+            <input
+              name="dueDate"
+              type="date"
+              defaultValue={card.dueDate ? card.dueDate.toISOString().slice(0, 10) : ""}
+              className="rounded border px-2 py-1.5 text-sm text-foreground"
+            />
+          </label>
+          <div className="flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() => onDelete(card.id)}
+              className="text-sm text-red-600 hover:underline"
+            >
+              Delete card
+            </button>
+            <div className="flex gap-2">
+              <button type="button" onClick={onClose} className="rounded border px-3 py-1.5 text-sm">
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="rounded bg-foreground px-3 py-1.5 text-sm text-background"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }

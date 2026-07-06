@@ -36,4 +36,8 @@ Configured in [`src/auth.ts`](src/auth.ts): email/password (Credentials provider
 
 ## Scope of this scaffold
 
-Boards, lists, and cards can be created, edited (card title/description/due date, list title), and deleted, and lists/cards can be drag-and-dropped to reorder (including across lists) via [`src/app/boards/[id]/Board.tsx`](<src/app/boards/[id]/Board.tsx>), backed by `@dnd-kit`. Intentionally left out: shared-board membership (`boardMember` table exists but isn't wired into the UI yet) and labels.
+Boards, lists, and cards can be created and deleted, and lists/cards can be drag-and-dropped to reorder (including across lists) via [`src/app/boards/[id]/Board.tsx`](<src/app/boards/[id]/Board.tsx>), backed by `@dnd-kit`. Card/list titles have a quick inline rename; a card's description and due date are edited in a modal (opened via the "Add details…" line on the card face). Intentionally left out: shared-board membership (`boardMember` table exists but isn't wired into the UI yet) and labels.
+
+## Deploying (Vercel)
+
+`DATABASE_URL` and `AUTH_SECRET` (and optionally `AUTH_GITHUB_ID`/`AUTH_GITHUB_SECRET`) must be set in the Vercel project's Environment Variables — `.env.local` is gitignored and never reaches the deployed build.

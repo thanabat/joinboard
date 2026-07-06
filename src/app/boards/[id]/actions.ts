@@ -92,6 +92,16 @@ export async function deleteList(listId: string) {
   revalidatePath(`/boards/${board.id}`);
 }
 
+export async function renameCard(cardId: string, title: string) {
+  const { board } = await requireCardOwnership(cardId);
+
+  const trimmed = title.trim();
+  if (!trimmed) throw new Error("Title is required");
+
+  await db.update(cards).set({ title: trimmed }).where(eq(cards.id, cardId));
+  revalidatePath(`/boards/${board.id}`);
+}
+
 export async function updateCard(
   cardId: string,
   updates: { title: string; description: string | null; dueDate: string | null },
