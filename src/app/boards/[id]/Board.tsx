@@ -60,6 +60,7 @@ export function Board({
 }) {
   const [lists, setLists] = useState(initialLists);
   const [boardLabels, setBoardLabels] = useState(initialLabels);
+  const [showLabelText, setShowLabelText] = useState(false);
   const [editingListId, setEditingListId] = useState<string | null>(null);
   const [editingCardTitleId, setEditingCardTitleId] = useState<string | null>(null);
   const [detailCardId, setDetailCardId] = useState<string | null>(null);
@@ -305,6 +306,8 @@ export function Board({
               key={list.id}
               list={list}
               boardLabels={boardLabels}
+              showLabelText={showLabelText}
+              onToggleLabelText={() => setShowLabelText((prev) => !prev)}
               isEditing={editingListId === list.id}
               onStartEdit={() => setEditingListId(list.id)}
               onCancelEdit={() => setEditingListId(null)}
@@ -359,6 +362,8 @@ export function Board({
 function SortableList({
   list,
   boardLabels,
+  showLabelText,
+  onToggleLabelText,
   isEditing,
   onStartEdit,
   onCancelEdit,
@@ -374,6 +379,8 @@ function SortableList({
 }: {
   list: ListData;
   boardLabels: Label[];
+  showLabelText: boolean;
+  onToggleLabelText: () => void;
   isEditing: boolean;
   onStartEdit: () => void;
   onCancelEdit: () => void;
@@ -451,6 +458,8 @@ function SortableList({
               key={card.id}
               card={card}
               boardLabels={boardLabels}
+              showLabelText={showLabelText}
+              onToggleLabelText={onToggleLabelText}
               isEditingTitle={editingCardTitleId === card.id}
               onStartRename={() => onStartRenameCard(card.id)}
               onCancelRename={onCancelRenameCard}
@@ -483,6 +492,8 @@ function SortableList({
 function SortableCard({
   card,
   boardLabels,
+  showLabelText,
+  onToggleLabelText,
   isEditingTitle,
   onStartRename,
   onCancelRename,
@@ -492,6 +503,8 @@ function SortableCard({
 }: {
   card: CardItem;
   boardLabels: Label[];
+  showLabelText: boolean;
+  onToggleLabelText: () => void;
   isEditingTitle: boolean;
   onStartRename: () => void;
   onCancelRename: () => void;
@@ -547,12 +560,21 @@ function SortableCard({
       {cardLabels.length > 0 && (
         <div className="mb-1 flex flex-wrap gap-1">
           {cardLabels.map((label) => (
-            <span
+            <button
               key={label.id}
+              type="button"
               title={label.name}
+              aria-label={`Toggle label text (${label.name})`}
+              onClick={onToggleLabelText}
               style={{ backgroundColor: label.color }}
-              className="h-2 w-8 rounded-full"
-            />
+              className={
+                showLabelText
+                  ? "rounded px-2 py-0.5 text-xs font-medium text-white"
+                  : "h-2 w-8 rounded-full"
+              }
+            >
+              {showLabelText ? label.name : ""}
+            </button>
           ))}
         </div>
       )}
