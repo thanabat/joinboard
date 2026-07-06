@@ -38,6 +38,20 @@ export async function createList(boardId: string, title: string) {
   return list;
 }
 
+async function requireListOwnership(listId: string) {
+  const list = await db.query.lists.findFirst({ where: eq(lists.id, listId) });
+  if (!list) throw new Error("List not found");
+  const board = await requireBoardOwnership(list.boardId);
+  return { list, board };
+}
+
+async function requireCardOwnership(cardId: string) {
+  const card = await db.query.cards.findFirst({ where: eq(cards.id, cardId) });
+  if (!card) throw new Error("Card not found");
+  const { list, board } = await requireListOwnership(card.listId);
+  return { card, list, board };
+}
+
 export async function createCard(listId: string, title: string) {
   const list = await db.query.lists.findFirst({ where: eq(lists.id, listId) });
   if (!list) throw new Error("List not found");
@@ -58,6 +72,52 @@ export async function createCard(listId: string, title: string) {
 
   revalidatePath(`/boards/${list.boardId}`);
   return card;
+}
+
+export async function updateList(listId: string, title: string) {
+  const { board } = await requireListOwnership(listId);
+
+  const trimmed = title.trim();
+  if (!trimmed) throw new Error("Title is required");
+
+  await db.update(lists).set({ title: trimmed }).where(eq(lists.id, listId));
+  revalidatePath(`/boards/${board.id}`);
+}
+
+export async function deleteList(listId: string) {
+  const { board } = await requireListOwnership(listId);
+
+  // Cascades to the list's cards via the cards.listId foreign key.
+  await db.delete(lists).where(eq(lists.id, listId));
+  revalidatePath(`/boards/${board.id}`);
+}
+
+export async function updateCard(
+  cardId: string,
+  updates: { title: string; description: string | null; dueDate: string | null },
+) {
+  const { board } = await requireCardOwnership(cardId);
+
+  const trimmed = updates.title.trim();
+  if (!trimmed) throw new Error("Title is required");
+
+  await db
+    .update(cards)
+    .set({
+      title: trimmed,
+      description: updates.description?.trim() || null,
+      dueDate: updates.dueDate ? new Date(updates.dueDate) : null,
+    })
+    .where(eq(cards.id, cardId));
+
+  revalidatePath(`/boards/${board.id}`);
+}
+
+export async function deleteCard(cardId: string) {
+  const { board } = await requireCardOwnership(cardId);
+
+  await db.delete(cards).where(eq(cards.id, cardId));
+  revalidatePath(`/boards/${board.id}`);
 }
 
 export async function reorderLists(boardId: string, orderedListIds: string[]) {

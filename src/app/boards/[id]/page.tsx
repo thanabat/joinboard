@@ -38,7 +38,12 @@ export default async function BoardPage({
     title: list.title,
     cards: boardCards
       .filter((card) => card.listId === list.id)
-      .map((card) => ({ id: card.id, title: card.title })),
+      .map((card) => ({
+        id: card.id,
+        title: card.title,
+        description: card.description,
+        dueDate: card.dueDate,
+      })),
   }));
 
   return (
