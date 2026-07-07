@@ -74,6 +74,64 @@ const POINTER_SENSOR_OPTIONS = { activationConstraint: { distance: 5 } };
 const iconButtonClass =
   "cursor-pointer rounded-md p-1.5 text-muted-foreground transition hover:bg-muted hover:text-foreground";
 
+const MAX_VISIBLE_AVATARS = 10;
+
+function avatarColor(seed: string) {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = seed.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return `hsl(${Math.abs(hash) % 360}, 60%, 45%)`;
+}
+
+function MemberAvatarStack({
+  ownerEmail,
+  members,
+  onClick,
+}: {
+  ownerEmail: string;
+  members: Member[];
+  onClick: () => void;
+}) {
+  const people = [
+    { email: ownerEmail, isAdmin: true },
+    ...members.filter((m) => m.status === "active").map((m) => ({ email: m.email, isAdmin: false })),
+  ];
+  const visible = people.slice(0, MAX_VISIBLE_AVATARS);
+  const overflow = people.length - visible.length;
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={`Members (${people.length})`}
+      className="flex cursor-pointer items-center gap-2 rounded-md border bg-card py-1.5 pl-1.5 pr-3 shadow-xs transition hover:bg-muted"
+    >
+      <div className="flex -space-x-2">
+        {visible.map((person) => (
+          <span
+            key={person.email}
+            title={person.email}
+            style={{ backgroundColor: person.isAdmin ? "var(--primary)" : avatarColor(person.email) }}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 border-card text-xs font-semibold text-white"
+          >
+            {person.email.charAt(0).toUpperCase()}
+          </span>
+        ))}
+        {overflow > 0 && (
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 border-card bg-muted text-xs font-semibold text-muted-foreground">
+            +{overflow}
+          </span>
+        )}
+      </div>
+      <span className="flex items-center gap-1 text-sm font-medium">
+        <Users className="h-3.5 w-3.5" />
+        Members
+      </span>
+    </button>
+  );
+}
+
 export function Board({
   boardId,
   initialLists,
@@ -391,17 +449,11 @@ export function Board({
   return (
     <div className="flex flex-1 flex-col gap-4">
       <div>
-        <button
-          type="button"
+        <MemberAvatarStack
+          ownerEmail={ownerEmail}
+          members={members}
           onClick={() => setShowMembers(true)}
-          className="flex cursor-pointer items-center gap-1.5 rounded-md border bg-card px-3 py-1.5 text-sm font-medium shadow-xs transition hover:bg-muted"
-        >
-          <Users className="h-4 w-4" />
-          Members
-          <span className="text-muted-foreground">
-            {members.filter((m) => m.status === "active").length + 1}
-          </span>
-        </button>
+        />
       </div>
 
       <DndContext
@@ -1070,7 +1122,10 @@ function MembersModal({
               key={member.userId}
               className="flex items-center gap-3 rounded-md bg-muted px-3 py-2 text-sm"
             >
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-border text-xs font-semibold text-foreground">
+              <span
+                style={{ backgroundColor: avatarColor(member.email) }}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white"
+              >
                 {member.email.charAt(0).toUpperCase()}
               </span>
               <span className="flex-1 truncate">{member.email}</span>

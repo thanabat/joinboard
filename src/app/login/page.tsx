@@ -33,7 +33,8 @@ export default async function LoginPage({
   return (
     <main className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center gap-8 px-6 py-12">
       <Link href="/" className="flex items-center justify-center gap-2">
-        <span className="h-7 w-7 rounded-md bg-primary" />
+        {/* eslint-disable-next-line @next/next/no-img-element -- static SVG logo, no next/image benefit */}
+        <img src="/joinboard-logo.svg" alt="" width={28} height={28} />
         <span className="text-lg font-semibold tracking-tight">Joinboard</span>
       </Link>
 

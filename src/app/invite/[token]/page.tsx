@@ -16,6 +16,8 @@ export default async function InvitePage({
   if (!board) {
     return (
       <main className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center gap-4 px-6 text-center">
+        {/* eslint-disable-next-line @next/next/no-img-element -- static SVG logo, no next/image benefit */}
+        <img src="/joinboard-logo.svg" alt="" width={40} height={40} className="mx-auto" />
         <h1 className="text-xl font-semibold tracking-tight">Invite link not found</h1>
         <p className="text-muted-foreground">
           This invite link is invalid or has been revoked. Ask the board admin for a new one.
@@ -32,6 +34,8 @@ export default async function InvitePage({
     const callbackUrl = `/invite/${token}`;
     return (
       <main className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center gap-6 px-6 text-center">
+        {/* eslint-disable-next-line @next/next/no-img-element -- static SVG logo, no next/image benefit */}
+        <img src="/joinboard-logo.svg" alt="" width={40} height={40} className="mx-auto" />
         <h1 className="text-xl font-semibold tracking-tight">
           You&apos;re invited to join &ldquo;{board.name}&rdquo;
         </h1>
@@ -64,6 +68,8 @@ export default async function InvitePage({
   if (existing?.status === "blocked") {
     return (
       <main className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center gap-4 px-6 text-center">
+        {/* eslint-disable-next-line @next/next/no-img-element -- static SVG logo, no next/image benefit */}
+        <img src="/joinboard-logo.svg" alt="" width={40} height={40} className="mx-auto" />
         <h1 className="text-xl font-semibold tracking-tight">Access denied</h1>
         <p className="text-muted-foreground">You&apos;ve been blocked from this board.</p>
         <Link href="/boards" className="text-sm font-medium text-primary hover:underline">

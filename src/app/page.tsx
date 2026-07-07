@@ -6,7 +6,8 @@ export default async function Home() {
 
   return (
     <main className="flex flex-1 flex-col items-center justify-center gap-6 px-6 text-center">
-      <span className="h-12 w-12 rounded-lg bg-primary shadow-sm" />
+      {/* eslint-disable-next-line @next/next/no-img-element -- static SVG logo, no next/image benefit */}
+      <img src="/joinboard-logo.svg" alt="Joinboard" width={56} height={56} />
       <div className="flex flex-col gap-3">
         <h1 className="text-4xl font-semibold tracking-tight">Joinboard</h1>
         <p className="max-w-md text-muted-foreground">

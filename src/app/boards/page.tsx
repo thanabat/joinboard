@@ -36,7 +36,8 @@ export default async function BoardsPage() {
       <header className="sticky top-0 z-10 border-b bg-card/80 backdrop-blur-sm">
         <div className="mx-auto flex w-full max-w-4xl items-center justify-between px-6 py-3.5">
           <Link href="/boards" className="flex items-center gap-2">
-            <span className="h-6 w-6 rounded-md bg-primary" />
+            {/* eslint-disable-next-line @next/next/no-img-element -- static SVG logo, no next/image benefit */}
+            <img src="/joinboard-logo.svg" alt="" width={24} height={24} />
             <span className="font-semibold tracking-tight">Joinboard</span>
           </Link>
           <form
