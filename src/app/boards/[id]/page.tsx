@@ -82,23 +82,31 @@ export default async function BoardPage({
   });
 
   return (
-    <main className="flex flex-1 flex-col gap-6 px-6 py-12">
-      <div className="flex items-center gap-4">
-        <Link href="/boards" className="text-sm underline">
-          ← Boards
-        </Link>
-        <h1 className="text-2xl font-semibold">{board.name}</h1>
-      </div>
+    <div className="flex flex-1 flex-col">
+      <header className="sticky top-0 z-10 border-b bg-card/80 backdrop-blur-sm">
+        <div className="flex items-center gap-3 px-6 py-3.5">
+          <Link
+            href="/boards"
+            className="flex items-center gap-1.5 rounded-md px-2 py-1 text-sm font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground"
+          >
+            ← Boards
+          </Link>
+          <span className="text-border">/</span>
+          <h1 className="text-lg font-semibold tracking-tight">{board.name}</h1>
+        </div>
+      </header>
 
-      <Board
-        boardId={board.id}
-        initialLists={initialLists}
-        initialLabels={boardLabels}
-        isAdmin={isAdmin}
-        ownerEmail={owner?.email ?? "(unknown)"}
-        initialMembers={members}
-        initialInviteToken={board.inviteToken}
-      />
-    </main>
+      <main className="flex flex-1 flex-col gap-4 px-6 py-6">
+        <Board
+          boardId={board.id}
+          initialLists={initialLists}
+          initialLabels={boardLabels}
+          isAdmin={isAdmin}
+          ownerEmail={owner?.email ?? "(unknown)"}
+          initialMembers={members}
+          initialInviteToken={board.inviteToken}
+        />
+      </main>
+    </div>
   );
 }

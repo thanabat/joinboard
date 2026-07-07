@@ -16,11 +16,11 @@ export default async function InvitePage({
   if (!board) {
     return (
       <main className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center gap-4 px-6 text-center">
-        <h1 className="text-xl font-semibold">Invite link not found</h1>
-        <p className="text-zinc-500">
+        <h1 className="text-xl font-semibold tracking-tight">Invite link not found</h1>
+        <p className="text-muted-foreground">
           This invite link is invalid or has been revoked. Ask the board admin for a new one.
         </p>
-        <Link href="/boards" className="text-sm underline">
+        <Link href="/boards" className="text-sm font-medium text-primary hover:underline">
           Go to your boards
         </Link>
       </main>
@@ -32,17 +32,19 @@ export default async function InvitePage({
     const callbackUrl = `/invite/${token}`;
     return (
       <main className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center gap-6 px-6 text-center">
-        <h1 className="text-xl font-semibold">You&apos;re invited to join &ldquo;{board.name}&rdquo;</h1>
+        <h1 className="text-xl font-semibold tracking-tight">
+          You&apos;re invited to join &ldquo;{board.name}&rdquo;
+        </h1>
         <div className="flex justify-center gap-3">
           <Link
             href={`/login?callbackUrl=${encodeURIComponent(callbackUrl)}`}
-            className="rounded border px-5 py-2.5"
+            className="rounded-md border bg-card px-5 py-2.5 text-sm font-medium text-foreground shadow-xs transition hover:bg-muted"
           >
             Log in
           </Link>
           <Link
             href={`/register?callbackUrl=${encodeURIComponent(callbackUrl)}`}
-            className="rounded bg-foreground px-5 py-2.5 text-background"
+            className="rounded-md bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:bg-primary-hover active:scale-[0.98]"
           >
             Sign up
           </Link>
@@ -62,9 +64,9 @@ export default async function InvitePage({
   if (existing?.status === "blocked") {
     return (
       <main className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center gap-4 px-6 text-center">
-        <h1 className="text-xl font-semibold">Access denied</h1>
-        <p className="text-zinc-500">You&apos;ve been blocked from this board.</p>
-        <Link href="/boards" className="text-sm underline">
+        <h1 className="text-xl font-semibold tracking-tight">Access denied</h1>
+        <p className="text-muted-foreground">You&apos;ve been blocked from this board.</p>
+        <Link href="/boards" className="text-sm font-medium text-primary hover:underline">
           Go to your boards
         </Link>
       </main>

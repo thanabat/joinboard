@@ -17,6 +17,20 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import {
+  AlignLeft,
+  Calendar,
+  Check,
+  Copy,
+  GripVertical,
+  Link2,
+  Pencil,
+  Plus,
+  Tag,
+  Trash2,
+  Users,
+  X,
+} from "lucide-react";
 import { useEffect, useRef, useState, useTransition, type FormEvent } from "react";
 import {
   blockMember,
@@ -56,6 +70,9 @@ type Member = { userId: string; email: string; status: string };
 // fresh literal here every render defeats dnd-kit's sensor memoization and
 // causes the drag to restart (re-fire onDragStart) on every state update.
 const POINTER_SENSOR_OPTIONS = { activationConstraint: { distance: 5 } };
+
+const iconButtonClass =
+  "cursor-pointer rounded-md p-1.5 text-muted-foreground transition hover:bg-muted hover:text-foreground";
 
 export function Board({
   boardId,
@@ -372,14 +389,18 @@ export function Board({
   )?.id;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-1 flex-col gap-4">
       <div>
         <button
           type="button"
           onClick={() => setShowMembers(true)}
-          className="text-sm underline"
+          className="flex cursor-pointer items-center gap-1.5 rounded-md border bg-card px-3 py-1.5 text-sm font-medium shadow-xs transition hover:bg-muted"
         >
-          Members ({members.filter((m) => m.status === "active").length + 1})
+          <Users className="h-4 w-4" />
+          Members
+          <span className="text-muted-foreground">
+            {members.filter((m) => m.status === "active").length + 1}
+          </span>
         </button>
       </div>
 
@@ -390,65 +411,66 @@ export function Board({
         onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}
       >
-      <div className="flex gap-4 overflow-x-auto">
-        <SortableContext items={lists.map((list) => list.id)} strategy={horizontalListSortingStrategy}>
-          {lists.map((list) => (
-            <SortableList
-              key={list.id}
-              list={list}
-              boardLabels={boardLabels}
-              showLabelText={showLabelText}
-              onToggleLabelText={() => setShowLabelText((prev) => !prev)}
-              isEditing={editingListId === list.id}
-              onStartEdit={() => setEditingListId(list.id)}
-              onCancelEdit={() => setEditingListId(null)}
-              onRename={handleRenameList}
-              onDelete={handleDeleteList}
-              onAddCard={handleAddCard}
-              editingCardTitleId={editingCardTitleId}
-              onStartRenameCard={setEditingCardTitleId}
-              onCancelRenameCard={() => setEditingCardTitleId(null)}
-              onRenameCard={handleRenameCard}
-              onOpenCardDetail={setDetailCardId}
-              onDeleteCard={handleDeleteCard}
-            />
-          ))}
-        </SortableContext>
+        <div className="flex flex-1 items-start gap-4 overflow-x-auto pb-4">
+          <SortableContext items={lists.map((list) => list.id)} strategy={horizontalListSortingStrategy}>
+            {lists.map((list) => (
+              <SortableList
+                key={list.id}
+                list={list}
+                boardLabels={boardLabels}
+                showLabelText={showLabelText}
+                onToggleLabelText={() => setShowLabelText((prev) => !prev)}
+                isEditing={editingListId === list.id}
+                onStartEdit={() => setEditingListId(list.id)}
+                onCancelEdit={() => setEditingListId(null)}
+                onRename={handleRenameList}
+                onDelete={handleDeleteList}
+                onAddCard={handleAddCard}
+                editingCardTitleId={editingCardTitleId}
+                onStartRenameCard={setEditingCardTitleId}
+                onCancelRenameCard={() => setEditingCardTitleId(null)}
+                onRenameCard={handleRenameCard}
+                onOpenCardDetail={setDetailCardId}
+                onDeleteCard={handleDeleteCard}
+              />
+            ))}
+          </SortableContext>
 
-        <form
-          onSubmit={handleAddList}
-          className="flex w-64 shrink-0 flex-col gap-2 rounded border border-dashed p-3"
-        >
-          <input
-            name="title"
-            placeholder="New list title"
-            required
-            className="rounded border px-2 py-1.5 text-sm"
-          />
-          <button
-            type="submit"
-            className="rounded bg-foreground px-2 py-1.5 text-sm text-background"
+          <form
+            onSubmit={handleAddList}
+            className="flex w-72 shrink-0 flex-col gap-2 rounded-lg border border-dashed p-3"
           >
-            Add list
-          </button>
-        </form>
-      </div>
+            <input
+              name="title"
+              placeholder="New list title"
+              required
+              className="rounded-md border bg-card px-2.5 py-1.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
+            />
+            <button
+              type="submit"
+              className="flex cursor-pointer items-center justify-center gap-1.5 rounded-md bg-primary px-2.5 py-1.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:bg-primary-hover active:scale-[0.98]"
+            >
+              <Plus className="h-4 w-4" />
+              Add list
+            </button>
+          </form>
+        </div>
 
-      {detailCard && detailCardListId && (
-        <CardDetailModal
-          card={detailCard}
-          boardLabels={boardLabels}
-          lists={lists}
-          currentListId={detailCardListId}
-          onClose={() => setDetailCardId(null)}
-          onSave={handleSaveCardDetail}
-          onDelete={handleDeleteCard}
-          onToggleLabel={handleToggleCardLabel}
-          onCreateLabel={handleCreateLabel}
-          onDeleteLabel={handleDeleteLabel}
-          onMove={handleMoveCard}
-        />
-      )}
+        {detailCard && detailCardListId && (
+          <CardDetailModal
+            card={detailCard}
+            boardLabels={boardLabels}
+            lists={lists}
+            currentListId={detailCardListId}
+            onClose={() => setDetailCardId(null)}
+            onSave={handleSaveCardDetail}
+            onDelete={handleDeleteCard}
+            onToggleLabel={handleToggleCardLabel}
+            onCreateLabel={handleCreateLabel}
+            onDeleteLabel={handleDeleteLabel}
+            onMove={handleMoveCard}
+          />
+        )}
       </DndContext>
 
       {showMembers && (
@@ -505,7 +527,7 @@ function SortableList({
   onOpenCardDetail: (cardId: string) => void;
   onDeleteCard: (cardId: string) => void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: list.id,
   });
 
@@ -515,7 +537,13 @@ function SortableList({
   };
 
   return (
-    <div ref={setNodeRef} style={style} className="w-64 shrink-0 rounded border bg-background p-3">
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`flex w-72 shrink-0 flex-col rounded-lg border bg-card p-3 shadow-xs transition ${
+        isDragging ? "opacity-60 shadow-md" : ""
+      }`}
+    >
       {isEditing ? (
         <form
           onSubmit={(event) => {
@@ -523,47 +551,46 @@ function SortableList({
             const input = event.currentTarget.elements.namedItem("title") as HTMLInputElement;
             onRename(list.id, input.value);
           }}
-          className="mb-2 flex gap-1"
+          className="mb-2 flex gap-1.5"
         >
           <input
             name="title"
             defaultValue={list.title}
             autoFocus
-            className="flex-1 rounded border px-2 py-1 text-sm font-medium"
+            className="flex-1 rounded-md border bg-background px-2 py-1 text-sm font-medium outline-none focus:border-primary focus:ring-2 focus:ring-ring/30"
             onKeyDown={(event) => {
               if (event.key === "Escape") onCancelEdit();
             }}
           />
-          <button type="submit" className="text-sm underline">
+          <button
+            type="submit"
+            className="cursor-pointer rounded-md bg-primary px-2.5 py-1 text-sm font-medium text-primary-foreground transition hover:bg-primary-hover"
+          >
             Save
           </button>
         </form>
       ) : (
-        <div className="mb-2 flex items-center justify-between gap-1">
-          <span {...attributes} {...listeners} className="flex-1 cursor-grab font-medium">
-            {list.title}
+        <div className="mb-2 flex items-center gap-1">
+          <span {...attributes} {...listeners} className="cursor-grab text-muted-foreground">
+            <GripVertical className="h-4 w-4" />
           </span>
-          <button
-            type="button"
-            onClick={onStartEdit}
-            aria-label="Rename list"
-            className="px-1 text-sm text-zinc-500 hover:text-foreground"
-          >
-            ✎
+          <span className="flex-1 truncate font-semibold tracking-tight">{list.title}</span>
+          <button type="button" onClick={onStartEdit} aria-label="Rename list" className={iconButtonClass}>
+            <Pencil className="h-3.5 w-3.5" />
           </button>
           <button
             type="button"
             onClick={() => onDelete(list.id)}
             aria-label="Delete list"
-            className="px-1 text-sm text-zinc-500 hover:text-red-600"
+            className={`${iconButtonClass} hover:text-destructive`}
           >
-            ×
+            <Trash2 className="h-3.5 w-3.5" />
           </button>
         </div>
       )}
 
       <SortableContext items={list.cards.map((card) => card.id)} strategy={verticalListSortingStrategy}>
-        <ul className="mb-3 flex min-h-2 flex-col gap-2">
+        <ul className="mb-2 flex min-h-2 flex-col gap-2">
           {list.cards.map((card) => (
             <SortableCard
               key={card.id}
@@ -587,12 +614,13 @@ function SortableList({
           name="title"
           placeholder="New card title"
           required
-          className="rounded border px-2 py-1.5 text-sm"
+          className="rounded-md border bg-background px-2.5 py-1.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
         />
         <button
           type="submit"
-          className="rounded bg-foreground px-2 py-1.5 text-sm text-background"
+          className="flex cursor-pointer items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground"
         >
+          <Plus className="h-4 w-4" />
           Add card
         </button>
       </form>
@@ -623,7 +651,7 @@ function SortableCard({
   onOpenDetail: () => void;
   onDelete: (cardId: string) => void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: card.id,
   });
 
@@ -636,25 +664,28 @@ function SortableCard({
 
   if (isEditingTitle) {
     return (
-      <li ref={setNodeRef} style={style} className="rounded border bg-zinc-50 p-2 text-sm dark:bg-zinc-900">
+      <li ref={setNodeRef} style={style} className="rounded-md border bg-card p-2 text-sm shadow-xs">
         <form
           onSubmit={(event) => {
             event.preventDefault();
             const input = event.currentTarget.elements.namedItem("title") as HTMLInputElement;
             onRename(card.id, input.value);
           }}
-          className="flex gap-1"
+          className="flex gap-1.5"
         >
           <input
             name="title"
             defaultValue={card.title}
             autoFocus
-            className="flex-1 rounded border px-2 py-1 text-sm"
+            className="flex-1 rounded-md border bg-background px-2 py-1 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-ring/30"
             onKeyDown={(event) => {
               if (event.key === "Escape") onCancelRename();
             }}
           />
-          <button type="submit" className="text-sm underline">
+          <button
+            type="submit"
+            className="cursor-pointer rounded-md bg-primary px-2.5 py-1 text-sm font-medium text-primary-foreground transition hover:bg-primary-hover"
+          >
             Save
           </button>
         </form>
@@ -666,10 +697,12 @@ function SortableCard({
     <li
       ref={setNodeRef}
       style={style}
-      className="group rounded bg-zinc-50 px-3 py-2 text-sm dark:bg-zinc-900"
+      className={`group rounded-md border bg-card px-3 py-2.5 text-sm shadow-xs transition hover:shadow-md ${
+        isDragging ? "opacity-60 shadow-md" : ""
+      }`}
     >
       {cardLabels.length > 0 && (
-        <div className="mb-1 flex flex-wrap gap-1">
+        <div className="mb-1.5 flex flex-wrap gap-1">
           {cardLabels.map((label) => (
             <button
               key={label.id}
@@ -680,8 +713,8 @@ function SortableCard({
               style={{ backgroundColor: label.color }}
               className={
                 showLabelText
-                  ? "rounded px-2 py-0.5 text-xs font-medium text-white"
-                  : "h-2 w-8 rounded-full"
+                  ? "cursor-pointer rounded px-2 py-0.5 text-xs font-medium text-white"
+                  : "h-2 w-8 cursor-pointer rounded-full"
               }
             >
               {showLabelText ? label.name : ""}
@@ -690,25 +723,20 @@ function SortableCard({
         </div>
       )}
       <div className="flex items-start justify-between gap-2">
-        <span {...attributes} {...listeners} className="flex-1 cursor-grab">
+        <span {...attributes} {...listeners} className="flex-1 cursor-grab leading-snug">
           {card.title}
         </span>
-        <div className="flex shrink-0 gap-1 opacity-0 group-hover:opacity-100">
-          <button
-            type="button"
-            onClick={onStartRename}
-            aria-label="Rename card"
-            className="px-1 text-zinc-500 hover:text-foreground"
-          >
-            ✎
+        <div className="flex shrink-0 gap-0.5 opacity-0 transition group-hover:opacity-100">
+          <button type="button" onClick={onStartRename} aria-label="Rename card" className={iconButtonClass}>
+            <Pencil className="h-3.5 w-3.5" />
           </button>
           <button
             type="button"
             onClick={() => onDelete(card.id)}
             aria-label="Delete card"
-            className="px-1 text-zinc-500 hover:text-red-600"
+            className={`${iconButtonClass} hover:text-destructive`}
           >
-            ×
+            <Trash2 className="h-3.5 w-3.5" />
           </button>
         </div>
       </div>
@@ -717,11 +745,25 @@ function SortableCard({
         type="button"
         onClick={onOpenDetail}
         aria-label="Open card details"
-        className="mt-1 block w-full text-left text-xs text-zinc-500 hover:underline"
+        className="mt-1.5 flex w-full flex-col items-start gap-1 text-left"
       >
-        {card.description && <p className="line-clamp-2">{card.description}</p>}
-        {card.dueDate && <p>Due {card.dueDate.toLocaleDateString()}</p>}
-        {!card.description && !card.dueDate && <span className="text-zinc-400">Add details…</span>}
+        {card.description && (
+          <span className="flex items-center gap-1 text-xs text-muted-foreground">
+            <AlignLeft className="h-3 w-3 shrink-0" />
+            <span className="line-clamp-1">{card.description}</span>
+          </span>
+        )}
+        {card.dueDate && (
+          <span className="flex items-center gap-1 text-xs text-muted-foreground">
+            <Calendar className="h-3 w-3 shrink-0" />
+            {card.dueDate.toLocaleDateString()}
+          </span>
+        )}
+        {!card.description && !card.dueDate && (
+          <span className="text-xs text-muted-foreground/70 hover:text-muted-foreground hover:underline">
+            Add details…
+          </span>
+        )}
       </button>
     </li>
   );
@@ -765,14 +807,14 @@ function CardDetailModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      className="animate-overlay-in fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
         role="dialog"
         aria-modal="true"
         onClick={(event) => event.stopPropagation()}
-        className="w-full max-w-md rounded border bg-background p-4 shadow-lg"
+        className="animate-modal-in w-full max-w-md rounded-lg border bg-card p-5 shadow-lg"
       >
         <form
           onSubmit={(event) => {
@@ -783,91 +825,109 @@ function CardDetailModal({
             const dueDate = (form.elements.namedItem("dueDate") as HTMLInputElement).value;
             onSave(card.id, { title, description: description || null, dueDate: dueDate || null });
           }}
-          className="flex flex-col gap-3"
+          className="flex flex-col gap-4"
         >
           <input
             name="title"
             defaultValue={card.title}
             autoFocus
-            className="rounded border px-2 py-1.5 text-base font-medium"
+            className="rounded-md border bg-background px-2.5 py-2 text-base font-semibold tracking-tight outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
           />
-          <textarea
-            name="description"
-            defaultValue={card.description ?? ""}
-            placeholder="Description"
-            rows={4}
-            className="rounded border px-2 py-1.5 text-sm"
-          />
-          <label className="flex flex-col gap-1 text-sm text-zinc-500">
-            Due date
-            <input
-              name="dueDate"
-              type="date"
-              defaultValue={card.dueDate ? card.dueDate.toISOString().slice(0, 10) : ""}
-              className="rounded border px-2 py-1.5 text-sm text-foreground"
+
+          <label className="flex flex-col gap-1.5 text-sm font-medium text-muted-foreground">
+            <span className="flex items-center gap-1.5">
+              <AlignLeft className="h-3.5 w-3.5" />
+              Description
+            </span>
+            <textarea
+              name="description"
+              defaultValue={card.description ?? ""}
+              placeholder="Add a more detailed description…"
+              rows={4}
+              className="rounded-md border bg-background px-2.5 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
             />
           </label>
 
-          <label className="flex flex-col gap-1 text-sm text-zinc-500">
-            List
-            <select
-              value={currentListId}
-              onChange={(event) => onMove(card.id, event.target.value)}
-              className="rounded border px-2 py-1.5 text-sm text-foreground"
-            >
-              {lists.map((list) => (
-                <option key={list.id} value={list.id}>
-                  {list.title}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex flex-col gap-1.5 text-sm font-medium text-muted-foreground">
+              <span className="flex items-center gap-1.5">
+                <Calendar className="h-3.5 w-3.5" />
+                Due date
+              </span>
+              <input
+                name="dueDate"
+                type="date"
+                defaultValue={card.dueDate ? card.dueDate.toISOString().slice(0, 10) : ""}
+                className="rounded-md border bg-background px-2.5 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
+              />
+            </label>
 
-          <div className="flex flex-col gap-1">
-            <span className="text-sm text-zinc-500">Labels</span>
-            {boardLabels.map((label) => {
-              const assigned = card.labelIds.includes(label.id);
-              return (
-                <div key={label.id} className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => onToggleLabel(card.id, label.id, !assigned)}
-                    style={
-                      assigned
-                        ? { backgroundColor: label.color, borderColor: label.color }
-                        : { borderColor: label.color, color: label.color }
-                    }
-                    className={
-                      assigned
-                        ? "flex-1 rounded border-2 px-2 py-1 text-left text-sm text-white"
-                        : "flex-1 rounded border-2 bg-transparent px-2 py-1 text-left text-sm"
-                    }
-                  >
-                    {assigned ? `✓ ${label.name}` : label.name}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onDeleteLabel(label.id)}
-                    aria-label={`Delete label ${label.name}`}
-                    className="px-1 text-xs text-zinc-500 hover:text-red-600"
-                  >
-                    ×
-                  </button>
-                </div>
-              );
-            })}
+            <label className="flex flex-col gap-1.5 text-sm font-medium text-muted-foreground">
+              List
+              <select
+                value={currentListId}
+                onChange={(event) => onMove(card.id, event.target.value)}
+                className="rounded-md border bg-background px-2.5 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
+              >
+                {lists.map((list) => (
+                  <option key={list.id} value={list.id}>
+                    {list.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+              <Tag className="h-3.5 w-3.5" />
+              Labels
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {boardLabels.map((label) => {
+                const assigned = card.labelIds.includes(label.id);
+                return (
+                  <div key={label.id} className="group/label flex items-center gap-0.5">
+                    <button
+                      type="button"
+                      onClick={() => onToggleLabel(card.id, label.id, !assigned)}
+                      style={
+                        assigned
+                          ? { backgroundColor: label.color, borderColor: label.color }
+                          : { borderColor: label.color, color: label.color }
+                      }
+                      className={
+                        assigned
+                          ? "cursor-pointer rounded-full border-2 px-2.5 py-1 text-left text-xs font-medium text-white transition"
+                          : "cursor-pointer rounded-full border-2 bg-transparent px-2.5 py-1 text-left text-xs font-medium transition"
+                      }
+                    >
+                      {assigned ? `✓ ${label.name}` : label.name}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onDeleteLabel(label.id)}
+                      aria-label={`Delete label ${label.name}`}
+                      className="cursor-pointer rounded p-1 text-muted-foreground opacity-0 transition hover:text-destructive group-hover/label:opacity-100"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
             <div className="flex gap-2">
               <input
                 type="color"
-                defaultValue="#2563eb"
+                defaultValue="#4f46e5"
                 ref={newLabelColorRef}
-                className="h-8 w-10 rounded border"
+                className="h-9 w-11 cursor-pointer rounded-md border bg-background p-1"
               />
               <input
                 type="text"
                 ref={newLabelNameRef}
                 placeholder="New label"
-                className="flex-1 rounded border px-2 py-1 text-sm"
+                className="flex-1 rounded-md border bg-background px-2.5 py-1.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
               />
               <button
                 type="button"
@@ -878,28 +938,34 @@ function CardDetailModal({
                   onCreateLabel(name, newLabelColorRef.current!.value);
                   newLabelNameRef.current!.value = "";
                 }}
-                className="rounded bg-foreground px-2 py-1 text-xs text-background"
+                className="flex cursor-pointer items-center gap-1 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground transition hover:bg-primary-hover"
               >
+                <Plus className="h-3.5 w-3.5" />
                 Add
               </button>
             </div>
           </div>
 
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between border-t pt-4">
             <button
               type="button"
               onClick={() => onDelete(card.id)}
-              className="text-sm text-red-600 hover:underline"
+              className="flex cursor-pointer items-center gap-1.5 text-sm font-medium text-destructive hover:underline"
             >
+              <Trash2 className="h-3.5 w-3.5" />
               Delete card
             </button>
             <div className="flex gap-2">
-              <button type="button" onClick={onClose} className="rounded border px-3 py-1.5 text-sm">
+              <button
+                type="button"
+                onClick={onClose}
+                className="cursor-pointer rounded-md border bg-card px-3.5 py-1.5 text-sm font-medium transition hover:bg-muted"
+              >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="rounded bg-foreground px-3 py-1.5 text-sm text-background"
+                className="cursor-pointer rounded-md bg-primary px-3.5 py-1.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:bg-primary-hover active:scale-[0.98]"
               >
                 Save
               </button>
@@ -909,6 +975,18 @@ function CardDetailModal({
       </div>
     </div>
   );
+}
+
+function statusBadgeClass(status: string) {
+  if (status === "active") return "bg-accent-tint text-accent";
+  if (status === "blocked") return "bg-destructive-tint text-destructive";
+  return "bg-primary-tint text-primary";
+}
+
+function statusLabel(status: string) {
+  if (status === "active") return "Active";
+  if (status === "blocked") return "Blocked";
+  return "Invited";
 }
 
 function MembersModal({
@@ -951,57 +1029,65 @@ function MembersModal({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
 
-  const statusLabel: Record<string, string> = {
-    active: "Active",
-    invited: "Invited",
-    blocked: "Blocked",
-  };
-
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      className="animate-overlay-in fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
         role="dialog"
         aria-modal="true"
         onClick={(event) => event.stopPropagation()}
-        className="w-full max-w-md rounded border bg-background p-4 shadow-lg"
+        className="animate-modal-in w-full max-w-md rounded-lg border bg-card p-5 shadow-lg"
       >
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-medium">Members</h2>
-          <button type="button" onClick={onClose} className="text-sm underline">
-            Close
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="flex items-center gap-1.5 text-base font-semibold tracking-tight">
+            <Users className="h-4 w-4" />
+            Members
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className={iconButtonClass}
+          >
+            <X className="h-4 w-4" />
           </button>
         </div>
 
-        <ul className="mb-3 flex flex-col gap-2">
-          <li className="flex items-center justify-between rounded bg-zinc-50 px-3 py-2 text-sm dark:bg-zinc-900">
-            <span>{ownerEmail}</span>
-            <span className="text-xs text-zinc-500">Admin</span>
+        <ul className="mb-4 flex flex-col gap-2">
+          <li className="flex items-center gap-3 rounded-md bg-muted px-3 py-2 text-sm">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
+              {ownerEmail.charAt(0).toUpperCase()}
+            </span>
+            <span className="flex-1 truncate">{ownerEmail}</span>
+            <span className="rounded-full bg-primary-tint px-2 py-0.5 text-xs font-medium text-primary">
+              Admin
+            </span>
           </li>
           {members.map((member) => (
             <li
               key={member.userId}
-              className="flex items-center justify-between gap-2 rounded bg-zinc-50 px-3 py-2 text-sm dark:bg-zinc-900"
+              className="flex items-center gap-3 rounded-md bg-muted px-3 py-2 text-sm"
             >
-              <span className="flex-1">{member.email}</span>
-              <span className="text-xs text-zinc-500">{statusLabel[member.status]}</span>
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-border text-xs font-semibold text-foreground">
+                {member.email.charAt(0).toUpperCase()}
+              </span>
+              <span className="flex-1 truncate">{member.email}</span>
+              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusBadgeClass(member.status)}`}>
+                {statusLabel(member.status)}
+              </span>
               {isAdmin && (
-                <div className="flex gap-2 text-xs">
+                <div className="flex gap-3 text-xs font-medium">
                   {member.status === "active" && (
                     <>
-                      <button
-                        type="button"
-                        onClick={() => onRemove(member.userId)}
-                        className="underline"
-                      >
+                      <button type="button" onClick={() => onRemove(member.userId)} className="cursor-pointer hover:underline">
                         Kick
                       </button>
                       <button
                         type="button"
                         onClick={() => onBlock(member.userId)}
-                        className="text-red-600 underline"
+                        className="cursor-pointer text-destructive hover:underline"
                       >
                         Block
                       </button>
@@ -1009,28 +1095,20 @@ function MembersModal({
                   )}
                   {member.status === "invited" && (
                     <>
-                      <button
-                        type="button"
-                        onClick={() => onInvite(member.email)}
-                        className="underline"
-                      >
+                      <button type="button" onClick={() => onInvite(member.email)} className="cursor-pointer hover:underline">
                         Re-invite
                       </button>
                       <button
                         type="button"
                         onClick={() => onRemove(member.userId)}
-                        className="text-red-600 underline"
+                        className="cursor-pointer text-destructive hover:underline"
                       >
                         Cancel
                       </button>
                     </>
                   )}
                   {member.status === "blocked" && (
-                    <button
-                      type="button"
-                      onClick={() => onUnblock(member.userId)}
-                      className="underline"
-                    >
+                    <button type="button" onClick={() => onUnblock(member.userId)} className="cursor-pointer hover:underline">
                       Unblock
                     </button>
                   )}
@@ -1049,18 +1127,18 @@ function MembersModal({
               onInvite(email);
               inviteEmailRef.current!.value = "";
             }}
-            className="mb-3 flex gap-2"
+            className="mb-4 flex gap-2"
           >
             <input
               type="email"
               ref={inviteEmailRef}
               placeholder="Invite by email"
               required
-              className="flex-1 rounded border px-2 py-1.5 text-sm"
+              className="flex-1 rounded-md border bg-background px-2.5 py-1.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
             />
             <button
               type="submit"
-              className="rounded bg-foreground px-3 py-1.5 text-sm text-background"
+              className="cursor-pointer rounded-md bg-primary px-3.5 py-1.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:bg-primary-hover"
             >
               Invite
             </button>
@@ -1068,8 +1146,11 @@ function MembersModal({
         )}
 
         {isAdmin && (
-          <div className="flex flex-col gap-2 border-t pt-3">
-            <span className="text-sm text-zinc-500">Invite link</span>
+          <div className="flex flex-col gap-2 border-t pt-4">
+            <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+              <Link2 className="h-3.5 w-3.5" />
+              Invite link
+            </span>
             {inviteLink ? (
               <>
                 <div className="flex gap-2">
@@ -1078,7 +1159,7 @@ function MembersModal({
                     readOnly
                     value={inviteLink}
                     onFocus={(event) => event.currentTarget.select()}
-                    className="flex-1 rounded border px-2 py-1.5 text-xs"
+                    className="flex-1 rounded-md border bg-background px-2.5 py-1.5 text-xs text-foreground outline-none"
                   />
                   <button
                     type="button"
@@ -1087,15 +1168,16 @@ function MembersModal({
                       setLinkCopied(true);
                       setTimeout(() => setLinkCopied(false), 2000);
                     }}
-                    className="rounded border px-3 py-1.5 text-sm"
+                    className="flex cursor-pointer items-center gap-1.5 rounded-md border bg-card px-3 py-1.5 text-sm font-medium transition hover:bg-muted"
                   >
-                    {linkCopied ? "Copied!" : "Copy"}
+                    {linkCopied ? <Check className="h-3.5 w-3.5 text-accent" /> : <Copy className="h-3.5 w-3.5" />}
+                    {linkCopied ? "Copied" : "Copy"}
                   </button>
                 </div>
                 <button
                   type="button"
                   onClick={onRevokeInviteLink}
-                  className="self-start text-sm text-red-600 underline"
+                  className="cursor-pointer self-start text-sm font-medium text-destructive hover:underline"
                 >
                   Revoke link
                 </button>
@@ -1104,12 +1186,13 @@ function MembersModal({
               <button
                 type="button"
                 onClick={onGenerateInviteLink}
-                className="self-start rounded border px-3 py-1.5 text-sm"
+                className="flex cursor-pointer items-center gap-1.5 self-start rounded-md border bg-card px-3 py-1.5 text-sm font-medium transition hover:bg-muted"
               >
+                <Link2 className="h-3.5 w-3.5" />
                 Create invite link
               </button>
             )}
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-muted-foreground">
               Anyone with this link can join the board — including people without an
               account yet. Sharing is up to you (chat, email, wherever).
             </p>
