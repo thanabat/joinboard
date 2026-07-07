@@ -334,3 +334,24 @@ export async function declineInvite(boardId: string) {
 
   revalidatePath("/boards");
 }
+
+// --- Shareable invite link (separate from the by-email invite above — no
+// approval step, and works for people who don't have an account yet) ---
+
+export async function generateInviteLink(boardId: string) {
+  await requireBoardAdmin(boardId);
+
+  const token = crypto.randomUUID();
+  await db.update(boards).set({ inviteToken: token }).where(eq(boards.id, boardId));
+
+  revalidatePath(`/boards/${boardId}`);
+  return token;
+}
+
+export async function revokeInviteLink(boardId: string) {
+  await requireBoardAdmin(boardId);
+
+  await db.update(boards).set({ inviteToken: null }).where(eq(boards.id, boardId));
+
+  revalidatePath(`/boards/${boardId}`);
+}

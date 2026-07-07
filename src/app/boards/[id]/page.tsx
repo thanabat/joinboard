@@ -97,6 +97,7 @@ export default async function BoardPage({
         isAdmin={isAdmin}
         ownerEmail={owner?.email ?? "(unknown)"}
         initialMembers={members}
+        initialInviteToken={board.inviteToken}
       />
     </main>
   );

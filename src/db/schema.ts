@@ -79,6 +79,8 @@ export const boards = pgTable("board", {
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
   createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
+  // Shareable join link token — null means no active invite link for this board.
+  inviteToken: text("inviteToken").unique(),
 });
 
 export const boardMembers = pgTable(

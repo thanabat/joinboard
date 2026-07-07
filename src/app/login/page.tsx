@@ -9,6 +9,9 @@ export default async function LoginPage({
   searchParams: Promise<{ callbackUrl?: string; error?: string }>;
 }) {
   const { callbackUrl: initialCallbackUrl, error } = await searchParams;
+  const callbackQuery = initialCallbackUrl
+    ? `?callbackUrl=${encodeURIComponent(initialCallbackUrl)}`
+    : "";
 
   async function login(formData: FormData) {
     "use server";
@@ -59,7 +62,10 @@ export default async function LoginPage({
         </button>
       </form>
       <p className="text-sm text-zinc-500">
-        No account? <Link href="/register" className="underline">Sign up</Link>
+        No account?{" "}
+        <Link href={`/register${callbackQuery}`} className="underline">
+          Sign up
+        </Link>
       </p>
     </main>
   );

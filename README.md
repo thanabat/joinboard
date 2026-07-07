@@ -40,7 +40,12 @@ Boards, lists, and cards can be created and deleted, and lists/cards can be drag
 
 ## Board membership
 
-The board creator is always the admin (`boards.ownerId`, not a `boardMember` row). Admins invite other **registered** users by email from the "Members" button on a board — invites can only be sent to accounts that already exist (there's no email-sending infra to invite someone who hasn't signed up yet). An invited user sees it under "Invitations" on `/boards` and can Accept or Decline. Admins can Kick (remove) or Block (revoke + prevent re-invite until unblocked) any active or invited member from the Members modal; a kicked/removed member loses board access immediately (`src/app/boards/[id]/actions.ts`'s `requireBoardAccess` checks `boardMembers.status = 'active'` OR ownership). Members have the same read/write access to lists/cards/labels as the admin — only membership management is admin-only.
+The board creator is always the admin (`boards.ownerId`, not a `boardMember` row). Two ways to add members, both from the "Members" button on a board:
+
+- **By email** — only works for users who already have an account (no email-sending infra to invite someone who hasn't signed up). They see it under "Invitations" on `/boards` and Accept/Decline.
+- **Invite link** (`generateInviteLink`/`revokeInviteLink` in [actions.ts](<src/app/boards/[id]/actions.ts>), joined via [`/invite/[token]`](<src/app/invite/[token]/page.tsx>)) — a reusable per-board link the admin shares out-of-band. Anyone who opens it joins immediately as an active member (no approval step); if they're not logged in, it sends them to log in or sign up first (preserving the link via `callbackUrl`) and brings them back to join afterward. Revoking regenerates/clears the token, killing the old link instantly.
+
+Admins can Kick (remove) or Block (revoke + prevent rejoining via either path until unblocked) any member from the Members modal; a kicked/blocked member loses board access immediately (`requireBoardAccess` checks `boardMembers.status = 'active'` OR ownership). Members have the same read/write access to lists/cards/labels as the admin — only membership management is admin-only.
 
 ## Deploying (Vercel)
 

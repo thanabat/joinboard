@@ -26,11 +26,13 @@ import {
   deleteCard,
   deleteLabel,
   deleteList,
+  generateInviteLink,
   inviteMember,
   removeMember,
   renameCard,
   reorderCards,
   reorderLists,
+  revokeInviteLink,
   setCardLabel,
   unblockMember,
   updateCard,
@@ -61,6 +63,7 @@ export function Board({
   isAdmin,
   ownerEmail,
   initialMembers,
+  initialInviteToken,
 }: {
   boardId: string;
   initialLists: ListData[];
@@ -68,10 +71,12 @@ export function Board({
   isAdmin: boolean;
   ownerEmail: string;
   initialMembers: Member[];
+  initialInviteToken: string | null;
 }) {
   const [lists, setLists] = useState(initialLists);
   const [boardLabels, setBoardLabels] = useState(initialLabels);
   const [members, setMembers] = useState(initialMembers);
+  const [inviteToken, setInviteToken] = useState(initialInviteToken);
   const [showLabelText, setShowLabelText] = useState(false);
   const [editingListId, setEditingListId] = useState<string | null>(null);
   const [editingCardTitleId, setEditingCardTitleId] = useState<string | null>(null);
@@ -330,6 +335,17 @@ export function Board({
     await unblockMember(boardId, userId);
   }
 
+  async function handleGenerateInviteLink() {
+    const token = await generateInviteLink(boardId);
+    setInviteToken(token);
+  }
+
+  async function handleRevokeInviteLink() {
+    if (!window.confirm("Revoke this invite link? It will stop working immediately.")) return;
+    setInviteToken(null);
+    await revokeInviteLink(boardId);
+  }
+
   const detailCard = lists.flatMap((list) => list.cards).find((card) => card.id === detailCardId);
 
   return (
@@ -414,11 +430,14 @@ export function Board({
           isAdmin={isAdmin}
           ownerEmail={ownerEmail}
           members={members}
+          inviteToken={inviteToken}
           onClose={() => setShowMembers(false)}
           onInvite={handleInvite}
           onRemove={handleRemoveMember}
           onBlock={handleBlockMember}
           onUnblock={handleUnblockMember}
+          onGenerateInviteLink={handleGenerateInviteLink}
+          onRevokeInviteLink={handleRevokeInviteLink}
         />
       )}
     </div>
@@ -842,22 +861,33 @@ function MembersModal({
   isAdmin,
   ownerEmail,
   members,
+  inviteToken,
   onClose,
   onInvite,
   onRemove,
   onBlock,
   onUnblock,
+  onGenerateInviteLink,
+  onRevokeInviteLink,
 }: {
   isAdmin: boolean;
   ownerEmail: string;
   members: Member[];
+  inviteToken: string | null;
   onClose: () => void;
   onInvite: (email: string) => void;
   onRemove: (userId: string) => void;
   onBlock: (userId: string) => void;
   onUnblock: (userId: string) => void;
+  onGenerateInviteLink: () => void;
+  onRevokeInviteLink: () => void;
 }) {
   const inviteEmailRef = useRef<HTMLInputElement>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const inviteLink =
+    inviteToken && typeof window !== "undefined"
+      ? `${window.location.origin}/invite/${inviteToken}`
+      : null;
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -965,7 +995,7 @@ function MembersModal({
               onInvite(email);
               inviteEmailRef.current!.value = "";
             }}
-            className="flex gap-2"
+            className="mb-3 flex gap-2"
           >
             <input
               type="email"
@@ -981,6 +1011,55 @@ function MembersModal({
               Invite
             </button>
           </form>
+        )}
+
+        {isAdmin && (
+          <div className="flex flex-col gap-2 border-t pt-3">
+            <span className="text-sm text-zinc-500">Invite link</span>
+            {inviteLink ? (
+              <>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={inviteLink}
+                    onFocus={(event) => event.currentTarget.select()}
+                    className="flex-1 rounded border px-2 py-1.5 text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(inviteLink);
+                      setLinkCopied(true);
+                      setTimeout(() => setLinkCopied(false), 2000);
+                    }}
+                    className="rounded border px-3 py-1.5 text-sm"
+                  >
+                    {linkCopied ? "Copied!" : "Copy"}
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={onRevokeInviteLink}
+                  className="self-start text-sm text-red-600 underline"
+                >
+                  Revoke link
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={onGenerateInviteLink}
+                className="self-start rounded border px-3 py-1.5 text-sm"
+              >
+                Create invite link
+              </button>
+            )}
+            <p className="text-xs text-zinc-500">
+              Anyone with this link can join the board — including people without an
+              account yet. Sharing is up to you (chat, email, wherever).
+            </p>
+          </div>
         )}
       </div>
     </div>

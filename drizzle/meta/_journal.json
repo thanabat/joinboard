@@ -15,6 +15,13 @@
       "when": 1783334031817,
       "tag": "0001_bumpy_scalphunter",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783392006335,
+      "tag": "0002_melted_fabian_cortez",
+      "breakpoints": true
     }
   ]
 }
