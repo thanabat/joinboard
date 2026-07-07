@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { users } from "@/db/schema";
 import bcrypt from "bcryptjs";
 import { eq } from "drizzle-orm";
+import { AuthError } from "next-auth";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 
@@ -37,7 +38,14 @@ export default async function RegisterPage({
     const passwordHash = await bcrypt.hash(password, 10);
     await db.insert(users).values({ email, name, passwordHash });
 
-    await signIn("credentials", { email, password, redirectTo: callbackUrl || "/boards" });
+    try {
+      await signIn("credentials", { email, password, redirectTo: callbackUrl || "/boards" });
+    } catch (error) {
+      if (error instanceof AuthError) {
+        redirect(`/register?error=${error.type}${callbackUrl ? `&callbackUrl=${encodeURIComponent(callbackUrl)}` : ""}`);
+      }
+      throw error;
+    }
   }
 
   return (
@@ -58,7 +66,9 @@ export default async function RegisterPage({
           <p className="rounded-md bg-destructive-tint px-3 py-2 text-sm text-destructive">
             {error === "email-taken"
               ? "An account with that email already exists."
-              : "Enter a valid email and a password of at least 8 characters."}
+              : error === "invalid-input"
+                ? "Enter a valid email and a password of at least 8 characters."
+                : "Your account was created, but signing you in failed. Please log in."}
           </p>
         )}
 
