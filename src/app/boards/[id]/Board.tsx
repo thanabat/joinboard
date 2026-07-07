@@ -28,6 +28,7 @@ import {
   deleteList,
   generateInviteLink,
   inviteMember,
+  moveCard,
   removeMember,
   renameCard,
   reorderCards,
@@ -268,6 +269,25 @@ export function Board({
     await deleteCard(cardId);
   }
 
+  async function handleMoveCard(cardId: string, targetListId: string) {
+    setLists((prev) => {
+      const sourceList = prev.find((list) => list.cards.some((c) => c.id === cardId));
+      const card = sourceList?.cards.find((c) => c.id === cardId);
+      if (!sourceList || !card || sourceList.id === targetListId) return prev;
+
+      return prev.map((list) => {
+        if (list.id === sourceList.id) {
+          return { ...list, cards: list.cards.filter((c) => c.id !== cardId) };
+        }
+        if (list.id === targetListId) {
+          return { ...list, cards: [...list.cards, card] };
+        }
+        return list;
+      });
+    });
+    await moveCard(cardId, targetListId);
+  }
+
   async function handleCreateLabel(name: string, color: string) {
     const label = await createLabel(boardId, name, color);
     setBoardLabels((prev) => [...prev, label]);
@@ -347,6 +367,9 @@ export function Board({
   }
 
   const detailCard = lists.flatMap((list) => list.cards).find((card) => card.id === detailCardId);
+  const detailCardListId = lists.find((list) =>
+    list.cards.some((card) => card.id === detailCardId),
+  )?.id;
 
   return (
     <div className="flex flex-col gap-4">
@@ -411,16 +434,19 @@ export function Board({
         </form>
       </div>
 
-      {detailCard && (
+      {detailCard && detailCardListId && (
         <CardDetailModal
           card={detailCard}
           boardLabels={boardLabels}
+          lists={lists}
+          currentListId={detailCardListId}
           onClose={() => setDetailCardId(null)}
           onSave={handleSaveCardDetail}
           onDelete={handleDeleteCard}
           onToggleLabel={handleToggleCardLabel}
           onCreateLabel={handleCreateLabel}
           onDeleteLabel={handleDeleteLabel}
+          onMove={handleMoveCard}
         />
       )}
       </DndContext>
@@ -704,21 +730,27 @@ function SortableCard({
 function CardDetailModal({
   card,
   boardLabels,
+  lists,
+  currentListId,
   onClose,
   onSave,
   onDelete,
   onToggleLabel,
   onCreateLabel,
   onDeleteLabel,
+  onMove,
 }: {
   card: CardItem;
   boardLabels: Label[];
+  lists: ListData[];
+  currentListId: string;
   onClose: () => void;
   onSave: (cardId: string, updates: CardUpdates) => void;
   onDelete: (cardId: string) => void;
   onToggleLabel: (cardId: string, labelId: string, assigned: boolean) => void;
   onCreateLabel: (name: string, color: string) => void;
   onDeleteLabel: (labelId: string) => void;
+  onMove: (cardId: string, targetListId: string) => void;
 }) {
   const newLabelNameRef = useRef<HTMLInputElement>(null);
   const newLabelColorRef = useRef<HTMLInputElement>(null);
@@ -774,6 +806,21 @@ function CardDetailModal({
               defaultValue={card.dueDate ? card.dueDate.toISOString().slice(0, 10) : ""}
               className="rounded border px-2 py-1.5 text-sm text-foreground"
             />
+          </label>
+
+          <label className="flex flex-col gap-1 text-sm text-zinc-500">
+            List
+            <select
+              value={currentListId}
+              onChange={(event) => onMove(card.id, event.target.value)}
+              className="rounded border px-2 py-1.5 text-sm text-foreground"
+            >
+              {lists.map((list) => (
+                <option key={list.id} value={list.id}>
+                  {list.title}
+                </option>
+              ))}
+            </select>
           </label>
 
           <div className="flex flex-col gap-1">

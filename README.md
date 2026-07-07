@@ -36,7 +36,7 @@ Configured in [`src/auth.ts`](src/auth.ts): email/password (Credentials provider
 
 ## Scope of this scaffold
 
-Boards, lists, and cards can be created and deleted, and lists/cards can be drag-and-dropped to reorder (including across lists) via [`src/app/boards/[id]/Board.tsx`](<src/app/boards/[id]/Board.tsx>), backed by `@dnd-kit`. Card/list titles have a quick inline rename; a card's description, due date, and labels are edited in a modal (opened via the "Add details…" line on the card face). Labels are per-board, colored, and created on the fly from the modal.
+Boards, lists, and cards can be created and deleted, and lists/cards can be drag-and-dropped to reorder (including across lists) via [`src/app/boards/[id]/Board.tsx`](<src/app/boards/[id]/Board.tsx>), backed by `@dnd-kit`. Card/list titles have a quick inline rename; a card's description, due date, labels, and list are edited in a modal (opened via the "Add details…" line on the card face) — the "List" dropdown there moves a card to another list without dragging (`moveCard` in [actions.ts](<src/app/boards/[id]/actions.ts>)), appending it to the end. Labels are per-board, colored, and created on the fly from the modal.
 
 ## Board membership
 

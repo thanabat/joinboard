@@ -151,6 +151,25 @@ export async function deleteCard(cardId: string) {
   revalidatePath(`/boards/${board.id}`);
 }
 
+export async function moveCard(cardId: string, targetListId: string) {
+  const { list: currentList } = await requireCardAccess(cardId);
+  const { list: targetList, board } = await requireListAccess(targetListId);
+
+  if (currentList.boardId !== targetList.boardId) throw new Error("List not found");
+
+  const [{ maxPosition }] = await db
+    .select({ maxPosition: max(cards.position) })
+    .from(cards)
+    .where(eq(cards.listId, targetListId));
+
+  await db
+    .update(cards)
+    .set({ listId: targetListId, position: (maxPosition ?? 0) + 1 })
+    .where(eq(cards.id, cardId));
+
+  revalidatePath(`/boards/${board.id}`);
+}
+
 export async function createLabel(boardId: string, name: string, color: string) {
   await requireBoardAccess(boardId);
 
