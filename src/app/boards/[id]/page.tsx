@@ -1,6 +1,6 @@
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { boardMembers, boards, cardLabels, cards, labels, lists, users } from "@/db/schema";
+import { boardMembers, boards, cardLabels, cardMembers, cards, labels, lists, users } from "@/db/schema";
 import { eq, inArray, and } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import Link from "next/link";
@@ -49,6 +49,9 @@ export default async function BoardPage({
   const cardLabelRows = cardIds.length
     ? await db.query.cardLabels.findMany({ where: inArray(cardLabels.cardId, cardIds) })
     : [];
+  const cardMemberRows = cardIds.length
+    ? await db.query.cardMembers.findMany({ where: inArray(cardMembers.cardId, cardIds) })
+    : [];
 
   const initialLists = boardLists.map((list) => ({
     id: list.id,
@@ -63,6 +66,9 @@ export default async function BoardPage({
         labelIds: cardLabelRows
           .filter((row) => row.cardId === card.id)
           .map((row) => row.labelId),
+        memberIds: cardMemberRows
+          .filter((row) => row.cardId === card.id)
+          .map((row) => row.userId),
       })),
   }));
 
@@ -80,6 +86,16 @@ export default async function BoardPage({
       status: row.status,
     };
   });
+
+  const assignableMembers = [
+    { userId: board.ownerId, email: owner?.email ?? "(unknown)" },
+    ...memberRows
+      .filter((row) => row.status === "active")
+      .map((row) => ({
+        userId: row.userId,
+        email: memberUsers.find((candidate) => candidate.id === row.userId)?.email ?? "(unknown)",
+      })),
+  ];
 
   return (
     <div className="flex flex-1 flex-col">
@@ -105,6 +121,8 @@ export default async function BoardPage({
           ownerEmail={owner?.email ?? "(unknown)"}
           initialMembers={members}
           initialInviteToken={board.inviteToken}
+          assignableMembers={assignableMembers}
+          currentUserId={userId}
         />
       </main>
     </div>

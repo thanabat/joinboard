@@ -2,7 +2,7 @@
 
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { boardMembers, boards, cardLabels, cards, labels, lists, users } from "@/db/schema";
+import { boardMembers, boards, cardLabels, cardMembers, cards, labels, lists, users } from "@/db/schema";
 import { and, eq, inArray, max } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
@@ -204,6 +204,33 @@ export async function setCardLabel(cardId: string, labelId: string, assigned: bo
     await db
       .delete(cardLabels)
       .where(and(eq(cardLabels.cardId, cardId), eq(cardLabels.labelId, labelId)));
+  }
+
+  revalidatePath(`/boards/${list.boardId}`);
+}
+
+export async function setCardMember(cardId: string, userId: string, assigned: boolean) {
+  const { list, board } = await requireCardAccess(cardId);
+
+  // Only the board owner or an active member can be assigned to a card.
+  const isOwner = userId === board.ownerId;
+  if (!isOwner) {
+    const membership = await db.query.boardMembers.findFirst({
+      where: and(
+        eq(boardMembers.boardId, board.id),
+        eq(boardMembers.userId, userId),
+        eq(boardMembers.status, "active"),
+      ),
+    });
+    if (!membership) throw new Error("Not a board member");
+  }
+
+  if (assigned) {
+    await db.insert(cardMembers).values({ cardId, userId }).onConflictDoNothing();
+  } else {
+    await db
+      .delete(cardMembers)
+      .where(and(eq(cardMembers.cardId, cardId), eq(cardMembers.userId, userId)));
   }
 
   revalidatePath(`/boards/${list.boardId}`);

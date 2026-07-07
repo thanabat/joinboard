@@ -144,3 +144,16 @@ export const cardLabels = pgTable(
   },
   (cardLabel) => [primaryKey({ columns: [cardLabel.cardId, cardLabel.labelId] })],
 );
+
+export const cardMembers = pgTable(
+  "cardMember",
+  {
+    cardId: text("cardId")
+      .notNull()
+      .references(() => cards.id, { onDelete: "cascade" }),
+    userId: text("userId")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+  },
+  (cardMember) => [primaryKey({ columns: [cardMember.cardId, cardMember.userId] })],
+);

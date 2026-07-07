@@ -49,6 +49,7 @@ import {
   reorderLists,
   revokeInviteLink,
   setCardLabel,
+  setCardMember,
   unblockMember,
   updateCard,
   updateList,
@@ -61,10 +62,12 @@ type CardItem = {
   description: string | null;
   dueDate: Date | null;
   labelIds: string[];
+  memberIds: string[];
 };
 type ListData = { id: string; title: string; cards: CardItem[] };
 type CardUpdates = { title: string; description: string | null; dueDate: string | null };
 type Member = { userId: string; email: string; status: string };
+type AssignableMember = { userId: string; email: string };
 
 // Hoisted so this object's identity is stable across renders — passing a
 // fresh literal here every render defeats dnd-kit's sensor memoization and
@@ -140,6 +143,8 @@ export function Board({
   ownerEmail,
   initialMembers,
   initialInviteToken,
+  assignableMembers,
+  currentUserId,
 }: {
   boardId: string;
   initialLists: ListData[];
@@ -148,6 +153,8 @@ export function Board({
   ownerEmail: string;
   initialMembers: Member[];
   initialInviteToken: string | null;
+  assignableMembers: AssignableMember[];
+  currentUserId: string;
 }) {
   const [lists, setLists] = useState(initialLists);
   const [boardLabels, setBoardLabels] = useState(initialLabels);
@@ -272,7 +279,14 @@ export function Board({
               ...list,
               cards: [
                 ...list.cards,
-                { id: card.id, title: card.title, description: null, dueDate: null, labelIds: [] },
+                {
+                  id: card.id,
+                  title: card.title,
+                  description: null,
+                  dueDate: null,
+                  labelIds: [],
+                  memberIds: [],
+                },
               ],
             }
           : list,
@@ -402,6 +416,25 @@ export function Board({
     await setCardLabel(cardId, labelId, assigned);
   }
 
+  async function handleToggleCardMember(cardId: string, userId: string, assigned: boolean) {
+    setLists((prev) =>
+      prev.map((list) => ({
+        ...list,
+        cards: list.cards.map((card) =>
+          card.id === cardId
+            ? {
+                ...card,
+                memberIds: assigned
+                  ? [...card.memberIds, userId]
+                  : card.memberIds.filter((id) => id !== userId),
+              }
+            : card,
+        ),
+      })),
+    );
+    await setCardMember(cardId, userId, assigned);
+  }
+
   async function handleInvite(email: string) {
     try {
       const member = await inviteMember(boardId, email);
@@ -470,6 +503,7 @@ export function Board({
                 key={list.id}
                 list={list}
                 boardLabels={boardLabels}
+                assignableMembers={assignableMembers}
                 showLabelText={showLabelText}
                 onToggleLabelText={() => setShowLabelText((prev) => !prev)}
                 isEditing={editingListId === list.id}
@@ -512,6 +546,8 @@ export function Board({
           <CardDetailModal
             card={detailCard}
             boardLabels={boardLabels}
+            assignableMembers={assignableMembers}
+            currentUserId={currentUserId}
             lists={lists}
             currentListId={detailCardListId}
             onClose={() => setDetailCardId(null)}
@@ -521,6 +557,7 @@ export function Board({
             onCreateLabel={handleCreateLabel}
             onDeleteLabel={handleDeleteLabel}
             onMove={handleMoveCard}
+            onToggleMember={handleToggleCardMember}
           />
         )}
       </DndContext>
@@ -547,6 +584,7 @@ export function Board({
 function SortableList({
   list,
   boardLabels,
+  assignableMembers,
   showLabelText,
   onToggleLabelText,
   isEditing,
@@ -564,6 +602,7 @@ function SortableList({
 }: {
   list: ListData;
   boardLabels: Label[];
+  assignableMembers: AssignableMember[];
   showLabelText: boolean;
   onToggleLabelText: () => void;
   isEditing: boolean;
@@ -648,6 +687,7 @@ function SortableList({
               key={card.id}
               card={card}
               boardLabels={boardLabels}
+              assignableMembers={assignableMembers}
               showLabelText={showLabelText}
               onToggleLabelText={onToggleLabelText}
               isEditingTitle={editingCardTitleId === card.id}
@@ -683,6 +723,7 @@ function SortableList({
 function SortableCard({
   card,
   boardLabels,
+  assignableMembers,
   showLabelText,
   onToggleLabelText,
   isEditingTitle,
@@ -694,6 +735,7 @@ function SortableCard({
 }: {
   card: CardItem;
   boardLabels: Label[];
+  assignableMembers: AssignableMember[];
   showLabelText: boolean;
   onToggleLabelText: () => void;
   isEditingTitle: boolean;
@@ -713,6 +755,7 @@ function SortableCard({
   };
 
   const cardLabels = boardLabels.filter((label) => card.labelIds.includes(label.id));
+  const cardMembers = assignableMembers.filter((member) => card.memberIds.includes(member.userId));
 
   if (isEditingTitle) {
     return (
@@ -817,6 +860,21 @@ function SortableCard({
           </span>
         )}
       </button>
+
+      {cardMembers.length > 0 && (
+        <div className="mt-1.5 flex -space-x-1.5">
+          {cardMembers.map((member) => (
+            <span
+              key={member.userId}
+              title={member.email}
+              style={{ backgroundColor: avatarColor(member.email) }}
+              className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-card text-[10px] font-semibold text-white"
+            >
+              {member.email.charAt(0).toUpperCase()}
+            </span>
+          ))}
+        </div>
+      )}
     </li>
   );
 }
@@ -824,6 +882,8 @@ function SortableCard({
 function CardDetailModal({
   card,
   boardLabels,
+  assignableMembers,
+  currentUserId,
   lists,
   currentListId,
   onClose,
@@ -833,9 +893,12 @@ function CardDetailModal({
   onCreateLabel,
   onDeleteLabel,
   onMove,
+  onToggleMember,
 }: {
   card: CardItem;
   boardLabels: Label[];
+  assignableMembers: AssignableMember[];
+  currentUserId: string;
   lists: ListData[];
   currentListId: string;
   onClose: () => void;
@@ -845,6 +908,7 @@ function CardDetailModal({
   onCreateLabel: (name: string, color: string) => void;
   onDeleteLabel: (labelId: string) => void;
   onMove: (cardId: string, targetListId: string) => void;
+  onToggleMember: (cardId: string, userId: string, assigned: boolean) => void;
 }) {
   const newLabelNameRef = useRef<HTMLInputElement>(null);
   const newLabelColorRef = useRef<HTMLInputElement>(null);
@@ -928,6 +992,45 @@ function CardDetailModal({
                 ))}
               </select>
             </label>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+              <Users className="h-3.5 w-3.5" />
+              Members
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {assignableMembers.map((member) => {
+                const assigned = card.memberIds.includes(member.userId);
+                const isSelf = member.userId === currentUserId;
+                const label = isSelf
+                  ? assigned
+                    ? "Leave"
+                    : "Join"
+                  : assigned
+                    ? `Remove ${member.email}`
+                    : `Assign to ${member.email}`;
+                return (
+                  <button
+                    key={member.userId}
+                    type="button"
+                    title={member.email}
+                    onClick={() => onToggleMember(card.id, member.userId, !assigned)}
+                    className={`flex cursor-pointer items-center gap-1.5 rounded-full border-2 py-0.5 pl-0.5 pr-2.5 text-xs font-medium transition ${
+                      assigned ? "border-primary bg-primary-tint text-primary" : "border-transparent bg-muted text-muted-foreground hover:bg-border/60"
+                    }`}
+                  >
+                    <span
+                      style={{ backgroundColor: avatarColor(member.email) }}
+                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+                    >
+                      {member.email.charAt(0).toUpperCase()}
+                    </span>
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <div className="flex flex-col gap-2">
