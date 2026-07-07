@@ -785,11 +785,18 @@ function CardDetailModal({
                   <button
                     type="button"
                     onClick={() => onToggleLabel(card.id, label.id, !assigned)}
-                    style={{ backgroundColor: label.color }}
-                    className="flex-1 rounded px-2 py-1 text-left text-sm text-white"
+                    style={
+                      assigned
+                        ? { backgroundColor: label.color, borderColor: label.color }
+                        : { borderColor: label.color, color: label.color }
+                    }
+                    className={
+                      assigned
+                        ? "flex-1 rounded border-2 px-2 py-1 text-left text-sm text-white"
+                        : "flex-1 rounded border-2 bg-transparent px-2 py-1 text-left text-sm"
+                    }
                   >
-                    {label.name}
-                    {assigned ? " ✓" : ""}
+                    {assigned ? `✓ ${label.name}` : label.name}
                   </button>
                   <button
                     type="button"
