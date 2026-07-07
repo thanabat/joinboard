@@ -912,6 +912,8 @@ function CardDetailModal({
 }) {
   const newLabelNameRef = useRef<HTMLInputElement>(null);
   const newLabelColorRef = useRef<HTMLInputElement>(null);
+  const [memberQuery, setMemberQuery] = useState("");
+  const [memberDropdownOpen, setMemberDropdownOpen] = useState(false);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -920,6 +922,13 @@ function CardDetailModal({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
+
+  const unassignedMembers = assignableMembers.filter(
+    (member) =>
+      member.userId !== currentUserId &&
+      !card.memberIds.includes(member.userId) &&
+      member.email.toLowerCase().includes(memberQuery.trim().toLowerCase()),
+  );
 
   return (
     <div
@@ -1000,36 +1009,81 @@ function CardDetailModal({
               Members
             </span>
             <div className="flex flex-wrap gap-1.5">
-              {assignableMembers.map((member) => {
-                const assigned = card.memberIds.includes(member.userId);
-                const isSelf = member.userId === currentUserId;
-                const label = isSelf
-                  ? assigned
-                    ? "Leave"
-                    : "Join"
-                  : assigned
-                    ? `Remove ${member.email}`
-                    : `Assign to ${member.email}`;
-                return (
-                  <button
-                    key={member.userId}
-                    type="button"
-                    title={member.email}
-                    onClick={() => onToggleMember(card.id, member.userId, !assigned)}
-                    className={`flex cursor-pointer items-center gap-1.5 rounded-full border-2 py-0.5 pl-0.5 pr-2.5 text-xs font-medium transition ${
-                      assigned ? "border-primary bg-primary-tint text-primary" : "border-transparent bg-muted text-muted-foreground hover:bg-border/60"
-                    }`}
-                  >
-                    <span
-                      style={{ backgroundColor: avatarColor(member.email) }}
-                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+              {assignableMembers
+                .filter((member) => card.memberIds.includes(member.userId))
+                .map((member) => {
+                  const isSelf = member.userId === currentUserId;
+                  return (
+                    <button
+                      key={member.userId}
+                      type="button"
+                      title={member.email}
+                      onClick={() => onToggleMember(card.id, member.userId, false)}
+                      className="flex cursor-pointer items-center gap-1.5 rounded-full border-2 border-primary bg-primary-tint py-0.5 pl-0.5 pr-2.5 text-xs font-medium text-primary transition"
                     >
-                      {member.email.charAt(0).toUpperCase()}
-                    </span>
-                    {label}
-                  </button>
-                );
-              })}
+                      <span
+                        style={{ backgroundColor: avatarColor(member.email) }}
+                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+                      >
+                        {member.email.charAt(0).toUpperCase()}
+                      </span>
+                      {isSelf ? "Leave" : `Remove ${member.email}`}
+                    </button>
+                  );
+                })}
+              {!card.memberIds.includes(currentUserId) && (
+                <button
+                  type="button"
+                  onClick={() => onToggleMember(card.id, currentUserId, true)}
+                  className="cursor-pointer rounded-full border-2 border-transparent bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground transition hover:bg-border/60"
+                >
+                  Join
+                </button>
+              )}
+            </div>
+
+            <div className="relative">
+              <input
+                type="text"
+                value={memberQuery}
+                onFocus={() => setMemberDropdownOpen(true)}
+                onChange={(event) => {
+                  setMemberQuery(event.target.value);
+                  setMemberDropdownOpen(true);
+                }}
+                onBlur={() => setMemberDropdownOpen(false)}
+                placeholder="Assign to…"
+                className="w-full rounded-md border bg-background px-2.5 py-1.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
+              />
+              {memberDropdownOpen && (
+                <div className="absolute z-10 mt-1 max-h-40 w-full overflow-y-auto rounded-md border bg-card shadow-md">
+                  {unassignedMembers.length > 0 ? (
+                    unassignedMembers.map((member) => (
+                      <button
+                        key={member.userId}
+                        type="button"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => {
+                          onToggleMember(card.id, member.userId, true);
+                          setMemberQuery("");
+                          setMemberDropdownOpen(false);
+                        }}
+                        className="flex w-full cursor-pointer items-center gap-2 px-2.5 py-1.5 text-left text-sm transition hover:bg-muted"
+                      >
+                        <span
+                          style={{ backgroundColor: avatarColor(member.email) }}
+                          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+                        >
+                          {member.email.charAt(0).toUpperCase()}
+                        </span>
+                        {member.email}
+                      </button>
+                    ))
+                  ) : (
+                    <p className="px-2.5 py-1.5 text-sm text-muted-foreground">No members found</p>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
