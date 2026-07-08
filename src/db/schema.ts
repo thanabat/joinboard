@@ -5,6 +5,7 @@ import {
   text,
   integer,
   doublePrecision,
+  boolean,
 } from "drizzle-orm/pg-core";
 import type { AdapterAccountType } from "next-auth/adapters";
 
@@ -157,3 +158,14 @@ export const cardMembers = pgTable(
   },
   (cardMember) => [primaryKey({ columns: [cardMember.cardId, cardMember.userId] })],
 );
+
+export const checklistItems = pgTable("checklistItem", {
+  id: id(),
+  cardId: text("cardId")
+    .notNull()
+    .references(() => cards.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  completed: boolean("completed").notNull().default(false),
+  position: doublePrecision("position").notNull(),
+  createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
+});

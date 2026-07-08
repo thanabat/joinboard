@@ -1,6 +1,6 @@
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { boardMembers, boards, cardLabels, cardMembers, cards, labels, lists, users } from "@/db/schema";
+import { boardMembers, boards, cardLabels, cardMembers, cards, checklistItems, labels, lists, users } from "@/db/schema";
 import { eq, inArray, and } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import Link from "next/link";
@@ -52,6 +52,12 @@ export default async function BoardPage({
   const cardMemberRows = cardIds.length
     ? await db.query.cardMembers.findMany({ where: inArray(cardMembers.cardId, cardIds) })
     : [];
+  const checklistItemRows = cardIds.length
+    ? await db.query.checklistItems.findMany({
+        where: inArray(checklistItems.cardId, cardIds),
+        orderBy: (item, { asc }) => asc(item.position),
+      })
+    : [];
 
   const initialLists = boardLists.map((list) => ({
     id: list.id,
@@ -69,6 +75,9 @@ export default async function BoardPage({
         memberIds: cardMemberRows
           .filter((row) => row.cardId === card.id)
           .map((row) => row.userId),
+        checklistItems: checklistItemRows
+          .filter((item) => item.cardId === card.id)
+          .map((item) => ({ id: item.id, title: item.title, completed: item.completed })),
       })),
   }));
 

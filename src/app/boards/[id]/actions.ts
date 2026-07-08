@@ -2,7 +2,7 @@
 
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { boardMembers, boards, cardLabels, cardMembers, cards, labels, lists, users } from "@/db/schema";
+import { boardMembers, boards, cardLabels, cardMembers, cards, checklistItems, labels, lists, users } from "@/db/schema";
 import { and, eq, inArray, max } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
@@ -233,6 +233,56 @@ export async function setCardMember(cardId: string, userId: string, assigned: bo
       .where(and(eq(cardMembers.cardId, cardId), eq(cardMembers.userId, userId)));
   }
 
+  revalidatePath(`/boards/${list.boardId}`);
+}
+
+export async function createChecklistItem(cardId: string, title: string) {
+  const { list } = await requireCardAccess(cardId);
+
+  const trimmed = title.trim();
+  if (!trimmed) throw new Error("Title is required");
+
+  const [{ maxPosition }] = await db
+    .select({ maxPosition: max(checklistItems.position) })
+    .from(checklistItems)
+    .where(eq(checklistItems.cardId, cardId));
+
+  const [item] = await db
+    .insert(checklistItems)
+    .values({ cardId, title: trimmed, position: (maxPosition ?? 0) + 1 })
+    .returning();
+
+  revalidatePath(`/boards/${list.boardId}`);
+  return item;
+}
+
+export async function renameChecklistItem(itemId: string, title: string) {
+  const item = await db.query.checklistItems.findFirst({ where: eq(checklistItems.id, itemId) });
+  if (!item) throw new Error("Checklist item not found");
+  const { list } = await requireCardAccess(item.cardId);
+
+  const trimmed = title.trim();
+  if (!trimmed) throw new Error("Title is required");
+
+  await db.update(checklistItems).set({ title: trimmed }).where(eq(checklistItems.id, itemId));
+  revalidatePath(`/boards/${list.boardId}`);
+}
+
+export async function toggleChecklistItem(itemId: string, completed: boolean) {
+  const item = await db.query.checklistItems.findFirst({ where: eq(checklistItems.id, itemId) });
+  if (!item) throw new Error("Checklist item not found");
+  const { list } = await requireCardAccess(item.cardId);
+
+  await db.update(checklistItems).set({ completed }).where(eq(checklistItems.id, itemId));
+  revalidatePath(`/boards/${list.boardId}`);
+}
+
+export async function deleteChecklistItem(itemId: string) {
+  const item = await db.query.checklistItems.findFirst({ where: eq(checklistItems.id, itemId) });
+  if (!item) throw new Error("Checklist item not found");
+  const { list } = await requireCardAccess(item.cardId);
+
+  await db.delete(checklistItems).where(eq(checklistItems.id, itemId));
   revalidatePath(`/boards/${list.boardId}`);
 }
 

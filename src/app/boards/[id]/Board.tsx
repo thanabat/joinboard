@@ -24,6 +24,7 @@ import {
   Copy,
   GripVertical,
   Link2,
+  ListChecks,
   Pencil,
   Plus,
   Tag,
@@ -35,9 +36,11 @@ import { useEffect, useRef, useState, useTransition, type FormEvent } from "reac
 import {
   blockMember,
   createCard,
+  createChecklistItem,
   createLabel,
   createList,
   deleteCard,
+  deleteChecklistItem,
   deleteLabel,
   deleteList,
   generateInviteLink,
@@ -45,17 +48,20 @@ import {
   moveCard,
   removeMember,
   renameCard,
+  renameChecklistItem,
   reorderCards,
   reorderLists,
   revokeInviteLink,
   setCardLabel,
   setCardMember,
+  toggleChecklistItem,
   unblockMember,
   updateCard,
   updateList,
 } from "./actions";
 
 type Label = { id: string; name: string; color: string };
+type ChecklistItem = { id: string; title: string; completed: boolean };
 type CardItem = {
   id: string;
   title: string;
@@ -63,6 +69,7 @@ type CardItem = {
   dueDate: Date | null;
   labelIds: string[];
   memberIds: string[];
+  checklistItems: ChecklistItem[];
 };
 type ListData = { id: string; title: string; cards: CardItem[] };
 type CardUpdates = { title: string; description: string | null; dueDate: string | null };
@@ -286,6 +293,7 @@ export function Board({
                   dueDate: null,
                   labelIds: [],
                   memberIds: [],
+                  checklistItems: [],
                 },
               ],
             }
@@ -435,6 +443,76 @@ export function Board({
     await setCardMember(cardId, userId, assigned);
   }
 
+  async function handleAddChecklistItem(cardId: string, title: string) {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    const item = await createChecklistItem(cardId, trimmed);
+    setLists((prev) =>
+      prev.map((list) => ({
+        ...list,
+        cards: list.cards.map((card) =>
+          card.id === cardId
+            ? { ...card, checklistItems: [...card.checklistItems, item] }
+            : card,
+        ),
+      })),
+    );
+  }
+
+  async function handleRenameChecklistItem(cardId: string, itemId: string, title: string) {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    setLists((prev) =>
+      prev.map((list) => ({
+        ...list,
+        cards: list.cards.map((card) =>
+          card.id === cardId
+            ? {
+                ...card,
+                checklistItems: card.checklistItems.map((item) =>
+                  item.id === itemId ? { ...item, title: trimmed } : item,
+                ),
+              }
+            : card,
+        ),
+      })),
+    );
+    await renameChecklistItem(itemId, trimmed);
+  }
+
+  async function handleToggleChecklistItem(cardId: string, itemId: string, completed: boolean) {
+    setLists((prev) =>
+      prev.map((list) => ({
+        ...list,
+        cards: list.cards.map((card) =>
+          card.id === cardId
+            ? {
+                ...card,
+                checklistItems: card.checklistItems.map((item) =>
+                  item.id === itemId ? { ...item, completed } : item,
+                ),
+              }
+            : card,
+        ),
+      })),
+    );
+    await toggleChecklistItem(itemId, completed);
+  }
+
+  async function handleDeleteChecklistItem(cardId: string, itemId: string) {
+    setLists((prev) =>
+      prev.map((list) => ({
+        ...list,
+        cards: list.cards.map((card) =>
+          card.id === cardId
+            ? { ...card, checklistItems: card.checklistItems.filter((item) => item.id !== itemId) }
+            : card,
+        ),
+      })),
+    );
+    await deleteChecklistItem(itemId);
+  }
+
   async function handleInvite(email: string) {
     try {
       const member = await inviteMember(boardId, email);
@@ -558,6 +636,10 @@ export function Board({
             onDeleteLabel={handleDeleteLabel}
             onMove={handleMoveCard}
             onToggleMember={handleToggleCardMember}
+            onAddChecklistItem={handleAddChecklistItem}
+            onRenameChecklistItem={handleRenameChecklistItem}
+            onToggleChecklistItem={handleToggleChecklistItem}
+            onDeleteChecklistItem={handleDeleteChecklistItem}
           />
         )}
       </DndContext>
@@ -631,7 +713,7 @@ function SortableList({
     <div
       ref={setNodeRef}
       style={style}
-      className={`flex w-72 shrink-0 flex-col rounded-lg border bg-card p-3 shadow-xs transition ${
+      className={`group flex w-72 shrink-0 flex-col rounded-lg border bg-card p-3 shadow-xs transition ${
         isDragging ? "opacity-60 shadow-md" : ""
       }`}
     >
@@ -666,17 +748,19 @@ function SortableList({
             <GripVertical className="h-4 w-4" />
           </span>
           <span className="flex-1 truncate font-semibold tracking-tight">{list.title}</span>
-          <button type="button" onClick={onStartEdit} aria-label="Rename list" className={iconButtonClass}>
-            <Pencil className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => onDelete(list.id)}
-            aria-label="Delete list"
-            className={`${iconButtonClass} hover:text-destructive`}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
+          <div className="flex shrink-0 gap-0.5 opacity-0 transition group-hover:opacity-100">
+            <button type="button" onClick={onStartEdit} aria-label="Rename list" className={iconButtonClass}>
+              <Pencil className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => onDelete(list.id)}
+              aria-label="Delete list"
+              className={`${iconButtonClass} hover:text-destructive`}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
       )}
 
@@ -854,7 +938,19 @@ function SortableCard({
             {card.dueDate.toLocaleDateString()}
           </span>
         )}
-        {!card.description && !card.dueDate && (
+        {card.checklistItems.length > 0 && (
+          <span
+            className={`flex items-center gap-1 text-xs ${
+              card.checklistItems.every((item) => item.completed)
+                ? "text-accent"
+                : "text-muted-foreground"
+            }`}
+          >
+            <ListChecks className="h-3 w-3 shrink-0" />
+            {card.checklistItems.filter((item) => item.completed).length}/{card.checklistItems.length}
+          </span>
+        )}
+        {!card.description && !card.dueDate && card.checklistItems.length === 0 && (
           <span className="text-xs text-muted-foreground/70 hover:text-muted-foreground hover:underline">
             Add details…
           </span>
@@ -894,6 +990,10 @@ function CardDetailModal({
   onDeleteLabel,
   onMove,
   onToggleMember,
+  onAddChecklistItem,
+  onRenameChecklistItem,
+  onToggleChecklistItem,
+  onDeleteChecklistItem,
 }: {
   card: CardItem;
   boardLabels: Label[];
@@ -909,11 +1009,25 @@ function CardDetailModal({
   onDeleteLabel: (labelId: string) => void;
   onMove: (cardId: string, targetListId: string) => void;
   onToggleMember: (cardId: string, userId: string, assigned: boolean) => void;
+  onAddChecklistItem: (cardId: string, title: string) => void;
+  onRenameChecklistItem: (cardId: string, itemId: string, title: string) => void;
+  onToggleChecklistItem: (cardId: string, itemId: string, completed: boolean) => void;
+  onDeleteChecklistItem: (cardId: string, itemId: string) => void;
 }) {
   const newLabelNameRef = useRef<HTMLInputElement>(null);
   const newLabelColorRef = useRef<HTMLInputElement>(null);
+  const newChecklistItemRef = useRef<HTMLInputElement>(null);
+  const renameChecklistItemRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const [memberQuery, setMemberQuery] = useState("");
   const [memberDropdownOpen, setMemberDropdownOpen] = useState(false);
+  const [editingChecklistItemId, setEditingChecklistItemId] = useState<string | null>(null);
+
+  function commitChecklistRename(itemId: string) {
+    const input = renameChecklistItemRefs.current[itemId];
+    if (!input) return;
+    onRenameChecklistItem(card.id, itemId, input.value);
+    setEditingChecklistItemId(null);
+  }
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -1084,6 +1198,130 @@ function CardDetailModal({
                   )}
                 </div>
               )}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+              <ListChecks className="h-3.5 w-3.5" />
+              Checklist
+              {card.checklistItems.length > 0 && (
+                <span className="text-xs font-normal text-muted-foreground/70">
+                  ({card.checklistItems.filter((item) => item.completed).length}/
+                  {card.checklistItems.length})
+                </span>
+              )}
+            </span>
+
+            {card.checklistItems.length > 0 && (
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full rounded-full bg-accent transition-all"
+                  style={{
+                    width: `${
+                      (card.checklistItems.filter((item) => item.completed).length /
+                        card.checklistItems.length) *
+                      100
+                    }%`,
+                  }}
+                />
+              </div>
+            )}
+
+            {card.checklistItems.length > 0 && (
+              <ul className="flex flex-col gap-1">
+                {card.checklistItems.map((item) =>
+                  editingChecklistItemId === item.id ? (
+                    <li key={item.id}>
+                      <div className="flex gap-1.5">
+                        <input
+                          ref={(el) => {
+                            renameChecklistItemRefs.current[item.id] = el;
+                          }}
+                          defaultValue={item.title}
+                          autoFocus
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              commitChecklistRename(item.id);
+                            }
+                            if (event.key === "Escape") setEditingChecklistItemId(null);
+                          }}
+                          onBlur={() => setEditingChecklistItemId(null)}
+                          className="flex-1 rounded-md border bg-background px-2 py-1 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-ring/30"
+                        />
+                        <button
+                          type="button"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => commitChecklistRename(item.id)}
+                          className="cursor-pointer rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground transition hover:bg-primary-hover"
+                        >
+                          Save
+                        </button>
+                      </div>
+                    </li>
+                  ) : (
+                    <li key={item.id} className="group/item flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={item.completed}
+                        onChange={(event) =>
+                          onToggleChecklistItem(card.id, item.id, event.target.checked)
+                        }
+                        className="h-4 w-4 shrink-0 cursor-pointer rounded border-border accent-primary"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setEditingChecklistItemId(item.id)}
+                        className={`flex-1 truncate text-left text-sm ${
+                          item.completed ? "text-muted-foreground line-through" : ""
+                        }`}
+                      >
+                        {item.title}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onDeleteChecklistItem(card.id, item.id)}
+                        aria-label={`Delete checklist item ${item.title}`}
+                        className="cursor-pointer rounded p-1 text-muted-foreground opacity-0 transition hover:text-destructive group-hover/item:opacity-100"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </li>
+                  ),
+                )}
+              </ul>
+            )}
+
+            <div className="flex gap-2">
+              <input
+                type="text"
+                ref={newChecklistItemRef}
+                placeholder="Add an item"
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    const title = newChecklistItemRef.current?.value.trim();
+                    if (!title) return;
+                    onAddChecklistItem(card.id, title);
+                    newChecklistItemRef.current!.value = "";
+                  }
+                }}
+                className="flex-1 rounded-md border bg-background px-2.5 py-1.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const title = newChecklistItemRef.current?.value.trim();
+                  if (!title) return;
+                  onAddChecklistItem(card.id, title);
+                  newChecklistItemRef.current!.value = "";
+                }}
+                className="flex cursor-pointer items-center gap-1 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground transition hover:bg-primary-hover"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Add
+              </button>
             </div>
           </div>
 
