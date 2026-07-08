@@ -2,7 +2,7 @@
 
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { boardMembers, boards, cardLabels, cardMembers, cards, checklistItems, labels, lists, users } from "@/db/schema";
+import { boardMembers, boards, cardLabels, cardLinks, cardMembers, cards, checklistItems, labels, lists, users } from "@/db/schema";
 import { and, eq, inArray, max } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
@@ -169,6 +169,47 @@ export async function setCardType(cardId: string, type: string) {
   }
 
   await db.update(cards).set({ type }).where(eq(cards.id, cardId));
+  revalidatePath(`/boards/${board.id}`);
+}
+
+const LINK_RELATIONS = ["blocks", "is_blocked_by", "relates_to"] as const;
+
+export async function linkCards(cardId: string, targetCardId: string, relation: string) {
+  const { list, board } = await requireCardAccess(cardId);
+  if (!LINK_RELATIONS.includes(relation as (typeof LINK_RELATIONS)[number])) {
+    throw new Error("Invalid link relation");
+  }
+  if (cardId === targetCardId) throw new Error("A card cannot link to itself");
+
+  const targetCard = await db.query.cards.findFirst({ where: eq(cards.id, targetCardId) });
+  if (!targetCard) throw new Error("Card not found");
+  const { list: targetList } = await requireListAccess(targetCard.listId);
+  if (targetList.boardId !== list.boardId) throw new Error("Cards must be on the same board");
+
+  // "is_blocked_by" is stored as the inverse "blocks" row, so the DB only ever holds two type values.
+  const [sourceId, otherId, type] =
+    relation === "is_blocked_by" ? [targetCardId, cardId, "blocks"] : [cardId, targetCardId, relation];
+
+  const existing = await db.query.cardLinks.findFirst({
+    where: and(eq(cardLinks.cardId, sourceId), eq(cardLinks.linkedCardId, otherId), eq(cardLinks.type, type)),
+  });
+  if (existing) throw new Error("These cards are already linked this way");
+
+  const [link] = await db
+    .insert(cardLinks)
+    .values({ cardId: sourceId, linkedCardId: otherId, type })
+    .returning();
+
+  revalidatePath(`/boards/${board.id}`);
+  return link;
+}
+
+export async function unlinkCards(linkId: string) {
+  const link = await db.query.cardLinks.findFirst({ where: eq(cardLinks.id, linkId) });
+  if (!link) throw new Error("Link not found");
+  const { board } = await requireCardAccess(link.cardId);
+
+  await db.delete(cardLinks).where(eq(cardLinks.id, linkId));
   revalidatePath(`/boards/${board.id}`);
 }
 

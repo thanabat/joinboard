@@ -171,3 +171,17 @@ export const checklistItems = pgTable("checklistItem", {
   position: doublePrecision("position").notNull(),
   createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
 });
+
+export const cardLinks = pgTable("cardLink", {
+  id: id(),
+  // Stored from cardId's perspective: "blocks" means cardId blocks linkedCardId.
+  // "relates_to" is symmetric — direction doesn't affect the displayed label.
+  cardId: text("cardId")
+    .notNull()
+    .references(() => cards.id, { onDelete: "cascade" }),
+  linkedCardId: text("linkedCardId")
+    .notNull()
+    .references(() => cards.id, { onDelete: "cascade" }),
+  type: text("type").notNull(),
+  createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
+});

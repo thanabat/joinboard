@@ -1,7 +1,7 @@
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { boardMembers, boards, cardLabels, cardMembers, cards, checklistItems, labels, lists, users } from "@/db/schema";
-import { eq, inArray, and } from "drizzle-orm";
+import { boardMembers, boards, cardLabels, cardLinks, cardMembers, cards, checklistItems, labels, lists, users } from "@/db/schema";
+import { eq, inArray, and, or } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { Board } from "./Board";
@@ -58,6 +58,11 @@ export default async function BoardPage({
         orderBy: (item, { asc }) => asc(item.position),
       })
     : [];
+  const cardLinkRows = cardIds.length
+    ? await db.query.cardLinks.findMany({
+        where: or(inArray(cardLinks.cardId, cardIds), inArray(cardLinks.linkedCardId, cardIds)),
+      })
+    : [];
 
   const initialLists = boardLists.map((list) => ({
     id: list.id,
@@ -79,6 +84,20 @@ export default async function BoardPage({
         checklistItems: checklistItemRows
           .filter((item) => item.cardId === card.id)
           .map((item) => ({ id: item.id, title: item.title, completed: item.completed })),
+        links: cardLinkRows
+          .filter((row) => row.cardId === card.id || row.linkedCardId === card.id)
+          .map((row) => {
+            if (row.type === "relates_to") {
+              return {
+                id: row.id,
+                relation: "relates_to" as const,
+                otherCardId: row.cardId === card.id ? row.linkedCardId : row.cardId,
+              };
+            }
+            return row.cardId === card.id
+              ? { id: row.id, relation: "blocks" as const, otherCardId: row.linkedCardId }
+              : { id: row.id, relation: "is_blocked_by" as const, otherCardId: row.cardId };
+          }),
       })),
   }));
 

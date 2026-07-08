@@ -47,6 +47,7 @@ import {
   deleteList,
   generateInviteLink,
   inviteMember,
+  linkCards,
   moveCard,
   removeMember,
   renameChecklistItem,
@@ -58,6 +59,7 @@ import {
   setCardType,
   toggleChecklistItem,
   unblockMember,
+  unlinkCards,
   updateCard,
   updateList,
 } from "./actions";
@@ -65,6 +67,8 @@ import {
 type Label = { id: string; name: string; color: string };
 type ChecklistItem = { id: string; title: string; completed: boolean };
 type CardType = "task" | "backlog_item";
+type LinkRelation = "blocks" | "is_blocked_by" | "relates_to";
+type CardLink = { id: string; relation: LinkRelation; otherCardId: string };
 type CardItem = {
   id: string;
   title: string;
@@ -74,11 +78,18 @@ type CardItem = {
   memberIds: string[];
   checklistItems: ChecklistItem[];
   type: CardType;
+  links: CardLink[];
 };
 
 const CARD_TYPES: Record<CardType, { label: string; icon: typeof SquareCheck; color: string }> = {
   task: { label: "Task", icon: SquareCheck, color: "#4f46e5" },
   backlog_item: { label: "Product Backlog Item", icon: Bookmark, color: "#d97706" },
+};
+
+const LINK_RELATION_LABELS: Record<LinkRelation, string> = {
+  blocks: "Blocks",
+  is_blocked_by: "Is blocked by",
+  relates_to: "Relates to",
 };
 type ListData = { id: string; title: string; cards: CardItem[] };
 type CardUpdates = { title: string; description: string | null; dueDate: string | null };
@@ -296,6 +307,7 @@ export function Board({
                   memberIds: [],
                   checklistItems: [],
                   type: card.type as CardType,
+                  links: [],
                 },
               ],
             }
@@ -380,6 +392,50 @@ export function Board({
       })),
     );
     await setCardType(cardId, type);
+  }
+
+  async function handleLinkCard(cardId: string, targetCardId: string, relation: LinkRelation) {
+    try {
+      const link = await linkCards(cardId, targetCardId, relation);
+      if (!link) return;
+      setLists((prev) =>
+        prev.map((list) => ({
+          ...list,
+          cards: list.cards.map((card) => {
+            if (card.id === link.cardId) {
+              const newLink: CardLink =
+                link.type === "relates_to"
+                  ? { id: link.id, relation: "relates_to", otherCardId: link.linkedCardId }
+                  : { id: link.id, relation: "blocks", otherCardId: link.linkedCardId };
+              return { ...card, links: [...card.links, newLink] };
+            }
+            if (card.id === link.linkedCardId) {
+              const newLink: CardLink =
+                link.type === "relates_to"
+                  ? { id: link.id, relation: "relates_to", otherCardId: link.cardId }
+                  : { id: link.id, relation: "is_blocked_by", otherCardId: link.cardId };
+              return { ...card, links: [...card.links, newLink] };
+            }
+            return card;
+          }),
+        })),
+      );
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Couldn't link cards");
+    }
+  }
+
+  async function handleUnlinkCard(linkId: string) {
+    setLists((prev) =>
+      prev.map((list) => ({
+        ...list,
+        cards: list.cards.map((card) => ({
+          ...card,
+          links: card.links.filter((link) => link.id !== linkId),
+        })),
+      })),
+    );
+    await unlinkCards(linkId);
   }
 
   async function handleCreateLabel(name: string, color: string) {
@@ -615,6 +671,7 @@ export function Board({
 
         {detailCard && detailCardListId && (
           <CardDetailModal
+            key={detailCard.id}
             card={detailCard}
             boardLabels={boardLabels}
             assignableMembers={assignableMembers}
@@ -634,6 +691,9 @@ export function Board({
             onToggleChecklistItem={handleToggleChecklistItem}
             onDeleteChecklistItem={handleDeleteChecklistItem}
             onSetType={handleSetCardType}
+            onLinkCard={handleLinkCard}
+            onUnlinkCard={handleUnlinkCard}
+            onNavigateToCard={setDetailCardId}
           />
         )}
       </DndContext>
@@ -943,6 +1003,9 @@ function CardDetailModal({
   onToggleChecklistItem,
   onDeleteChecklistItem,
   onSetType,
+  onLinkCard,
+  onUnlinkCard,
+  onNavigateToCard,
 }: {
   card: CardItem;
   boardLabels: Label[];
@@ -963,6 +1026,9 @@ function CardDetailModal({
   onToggleChecklistItem: (cardId: string, itemId: string, completed: boolean) => void;
   onDeleteChecklistItem: (cardId: string, itemId: string) => void;
   onSetType: (cardId: string, type: CardType) => void;
+  onLinkCard: (cardId: string, targetCardId: string, relation: LinkRelation) => void;
+  onUnlinkCard: (linkId: string) => void;
+  onNavigateToCard: (cardId: string) => void;
 }) {
   const newLabelNameRef = useRef<HTMLInputElement>(null);
   const newLabelColorRef = useRef<HTMLInputElement>(null);
@@ -971,6 +1037,9 @@ function CardDetailModal({
   const [memberQuery, setMemberQuery] = useState("");
   const [memberDropdownOpen, setMemberDropdownOpen] = useState(false);
   const [editingChecklistItemId, setEditingChecklistItemId] = useState<string | null>(null);
+  const [linkQuery, setLinkQuery] = useState("");
+  const [linkDropdownOpen, setLinkDropdownOpen] = useState(false);
+  const [linkRelation, setLinkRelation] = useState<LinkRelation>("relates_to");
 
   function commitChecklistRename(itemId: string) {
     const input = renameChecklistItemRefs.current[itemId];
@@ -992,6 +1061,15 @@ function CardDetailModal({
       member.userId !== currentUserId &&
       !card.memberIds.includes(member.userId) &&
       member.email.toLowerCase().includes(memberQuery.trim().toLowerCase()),
+  );
+
+  const allCards = lists.flatMap((list) => list.cards);
+  const linkedCardIds = new Set(card.links.map((link) => link.otherCardId));
+  const linkableCards = allCards.filter(
+    (candidate) =>
+      candidate.id !== card.id &&
+      !linkedCardIds.has(candidate.id) &&
+      candidate.title.toLowerCase().includes(linkQuery.trim().toLowerCase()),
   );
 
   return (
@@ -1036,6 +1114,77 @@ function CardDetailModal({
               className="rounded-md border bg-background px-2.5 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
             />
           </label>
+
+          <div className="flex flex-col gap-2">
+            <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+              <Tag className="h-3.5 w-3.5" />
+              Labels
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {boardLabels.map((label) => {
+                const assigned = card.labelIds.includes(label.id);
+                return (
+                  <div
+                    key={label.id}
+                    style={
+                      assigned
+                        ? { backgroundColor: label.color, borderColor: label.color }
+                        : { borderColor: label.color, color: label.color }
+                    }
+                    className={
+                      assigned
+                        ? "group/label flex items-center gap-1 rounded-full border-2 py-1 pl-2.5 pr-1.5 text-xs font-medium text-white transition"
+                        : "group/label flex items-center gap-1 rounded-full border-2 bg-transparent py-1 pl-2.5 pr-1.5 text-xs font-medium transition"
+                    }
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onToggleLabel(card.id, label.id, !assigned)}
+                      className="cursor-pointer"
+                    >
+                      {assigned ? `✓ ${label.name}` : label.name}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onDeleteLabel(label.id)}
+                      aria-label={`Delete label ${label.name}`}
+                      className="cursor-pointer rounded-full p-0.5 opacity-0 transition hover:text-destructive group-hover/label:opacity-100"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex gap-2">
+              <input
+                type="color"
+                defaultValue="#4f46e5"
+                ref={newLabelColorRef}
+                className="h-9 w-11 cursor-pointer rounded-md border bg-background p-1"
+              />
+              <input
+                type="text"
+                ref={newLabelNameRef}
+                placeholder="New label"
+                className="flex-1 rounded-md border bg-background px-2.5 py-1.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
+              />
+              <button
+                type="button"
+                aria-label="Add label"
+                onClick={() => {
+                  const name = newLabelNameRef.current?.value.trim();
+                  if (!name) return;
+                  onCreateLabel(name, newLabelColorRef.current!.value);
+                  newLabelNameRef.current!.value = "";
+                }}
+                className="flex cursor-pointer items-center gap-1 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground transition hover:bg-primary-hover"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Add
+              </button>
+            </div>
+          </div>
 
           <div className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-muted-foreground">Type</span>
@@ -1309,69 +1458,100 @@ function CardDetailModal({
 
           <div className="flex flex-col gap-2">
             <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
-              <Tag className="h-3.5 w-3.5" />
-              Labels
+              <Link2 className="h-3.5 w-3.5" />
+              Linked cards
             </span>
-            <div className="flex flex-wrap gap-1.5">
-              {boardLabels.map((label) => {
-                const assigned = card.labelIds.includes(label.id);
-                return (
-                  <div key={label.id} className="group/label flex items-center gap-0.5">
-                    <button
-                      type="button"
-                      onClick={() => onToggleLabel(card.id, label.id, !assigned)}
-                      style={
-                        assigned
-                          ? { backgroundColor: label.color, borderColor: label.color }
-                          : { borderColor: label.color, color: label.color }
-                      }
-                      className={
-                        assigned
-                          ? "cursor-pointer rounded-full border-2 px-2.5 py-1 text-left text-xs font-medium text-white transition"
-                          : "cursor-pointer rounded-full border-2 bg-transparent px-2.5 py-1 text-left text-xs font-medium transition"
-                      }
-                    >
-                      {assigned ? `✓ ${label.name}` : label.name}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onDeleteLabel(label.id)}
-                      aria-label={`Delete label ${label.name}`}
-                      className="cursor-pointer rounded p-1 text-muted-foreground opacity-0 transition hover:text-destructive group-hover/label:opacity-100"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
+
+            {card.links.length > 0 && (
+              <ul className="flex flex-col gap-1.5">
+                {card.links.map((link) => {
+                  const otherCard = allCards.find((candidate) => candidate.id === link.otherCardId);
+                  const otherCardType = otherCard ? CARD_TYPES[otherCard.type] : null;
+                  const OtherTypeIcon = otherCardType?.icon;
+                  return (
+                    <li key={link.id} className="group/link flex items-center gap-2">
+                      <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
+                        {LINK_RELATION_LABELS[link.relation]}
+                      </span>
+                      {otherCard && OtherTypeIcon && otherCardType ? (
+                        <button
+                          type="button"
+                          onClick={() => onNavigateToCard(link.otherCardId)}
+                          className="flex flex-1 items-center gap-2 rounded-md border bg-card px-2.5 py-1.5 text-left transition hover:border-primary hover:shadow-xs"
+                        >
+                          <OtherTypeIcon
+                            className="h-3.5 w-3.5 shrink-0"
+                            style={{ color: otherCardType.color }}
+                          />
+                          <span className="flex-1 truncate text-sm font-medium">{otherCard.title}</span>
+                        </button>
+                      ) : (
+                        <span className="flex-1 truncate rounded-md border border-dashed px-2.5 py-1.5 text-sm text-muted-foreground">
+                          (unknown card)
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => onUnlinkCard(link.id)}
+                        aria-label="Remove link"
+                        className="cursor-pointer rounded p-1 text-muted-foreground opacity-0 transition hover:text-destructive group-hover/link:opacity-100"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+
             <div className="flex gap-2">
-              <input
-                type="color"
-                defaultValue="#4f46e5"
-                ref={newLabelColorRef}
-                className="h-9 w-11 cursor-pointer rounded-md border bg-background p-1"
-              />
-              <input
-                type="text"
-                ref={newLabelNameRef}
-                placeholder="New label"
-                className="flex-1 rounded-md border bg-background px-2.5 py-1.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
-              />
-              <button
-                type="button"
-                aria-label="Add label"
-                onClick={() => {
-                  const name = newLabelNameRef.current?.value.trim();
-                  if (!name) return;
-                  onCreateLabel(name, newLabelColorRef.current!.value);
-                  newLabelNameRef.current!.value = "";
-                }}
-                className="flex cursor-pointer items-center gap-1 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground transition hover:bg-primary-hover"
+              <select
+                value={linkRelation}
+                onChange={(event) => setLinkRelation(event.target.value as LinkRelation)}
+                className="rounded-md border bg-background px-2 py-1.5 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
               >
-                <Plus className="h-3.5 w-3.5" />
-                Add
-              </button>
+                <option value="relates_to">Relates to</option>
+                <option value="blocks">Blocks</option>
+                <option value="is_blocked_by">Is blocked by</option>
+              </select>
+
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  value={linkQuery}
+                  onFocus={() => setLinkDropdownOpen(true)}
+                  onChange={(event) => {
+                    setLinkQuery(event.target.value);
+                    setLinkDropdownOpen(true);
+                  }}
+                  onBlur={() => setLinkDropdownOpen(false)}
+                  placeholder="Search cards…"
+                  className="w-full rounded-md border bg-background px-2.5 py-1.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
+                />
+                {linkDropdownOpen && (
+                  <div className="absolute z-10 mt-1 max-h-40 w-full overflow-y-auto rounded-md border bg-card shadow-md">
+                    {linkableCards.length > 0 ? (
+                      linkableCards.map((candidate) => (
+                        <button
+                          key={candidate.id}
+                          type="button"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => {
+                            onLinkCard(card.id, candidate.id, linkRelation);
+                            setLinkQuery("");
+                            setLinkDropdownOpen(false);
+                          }}
+                          className="flex w-full cursor-pointer items-center px-2.5 py-1.5 text-left text-sm transition hover:bg-muted"
+                        >
+                          {candidate.title}
+                        </button>
+                      ))
+                    ) : (
+                      <p className="px-2.5 py-1.5 text-sm text-muted-foreground">No cards found</p>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
