@@ -47,7 +47,6 @@ import {
   inviteMember,
   moveCard,
   removeMember,
-  renameCard,
   renameChecklistItem,
   reorderCards,
   reorderLists,
@@ -169,7 +168,6 @@ export function Board({
   const [inviteToken, setInviteToken] = useState(initialInviteToken);
   const [showLabelText, setShowLabelText] = useState(false);
   const [editingListId, setEditingListId] = useState<string | null>(null);
-  const [editingCardTitleId, setEditingCardTitleId] = useState<string | null>(null);
   const [detailCardId, setDetailCardId] = useState<string | null>(null);
   const [showMembers, setShowMembers] = useState(false);
   const [, startTransition] = useTransition();
@@ -270,15 +268,8 @@ export function Board({
     setLists((prev) => [...prev, { id: list.id, title: list.title, cards: [] }]);
   }
 
-  async function handleAddCard(listId: string, event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const input = form.elements.namedItem("title") as HTMLInputElement;
-    const title = input.value.trim();
-    if (!title) return;
-    input.value = "";
-
-    const card = await createCard(listId, title);
+  async function handleAddCard(listId: string) {
+    const card = await createCard(listId, "New card");
     setLists((prev) =>
       prev.map((list) =>
         list.id === listId
@@ -300,6 +291,7 @@ export function Board({
           : list,
       ),
     );
+    setDetailCardId(card.id);
   }
 
   async function handleRenameList(listId: string, title: string) {
@@ -317,22 +309,6 @@ export function Board({
     if (!window.confirm("Delete this list and all its cards?")) return;
     setLists((prev) => prev.filter((l) => l.id !== listId));
     await deleteList(listId);
-  }
-
-  async function handleRenameCard(cardId: string, title: string) {
-    const trimmed = title.trim();
-    if (!trimmed) {
-      setEditingCardTitleId(null);
-      return;
-    }
-    setLists((prev) =>
-      prev.map((list) => ({
-        ...list,
-        cards: list.cards.map((card) => (card.id === cardId ? { ...card, title: trimmed } : card)),
-      })),
-    );
-    setEditingCardTitleId(null);
-    await renameCard(cardId, trimmed);
   }
 
   async function handleSaveCardDetail(cardId: string, updates: CardUpdates) {
@@ -590,10 +566,6 @@ export function Board({
                 onRename={handleRenameList}
                 onDelete={handleDeleteList}
                 onAddCard={handleAddCard}
-                editingCardTitleId={editingCardTitleId}
-                onStartRenameCard={setEditingCardTitleId}
-                onCancelRenameCard={() => setEditingCardTitleId(null)}
-                onRenameCard={handleRenameCard}
                 onOpenCardDetail={setDetailCardId}
                 onDeleteCard={handleDeleteCard}
               />
@@ -675,10 +647,6 @@ function SortableList({
   onRename,
   onDelete,
   onAddCard,
-  editingCardTitleId,
-  onStartRenameCard,
-  onCancelRenameCard,
-  onRenameCard,
   onOpenCardDetail,
   onDeleteCard,
 }: {
@@ -692,11 +660,7 @@ function SortableList({
   onCancelEdit: () => void;
   onRename: (listId: string, title: string) => void;
   onDelete: (listId: string) => void;
-  onAddCard: (listId: string, event: FormEvent<HTMLFormElement>) => void;
-  editingCardTitleId: string | null;
-  onStartRenameCard: (cardId: string) => void;
-  onCancelRenameCard: () => void;
-  onRenameCard: (cardId: string, title: string) => void;
+  onAddCard: (listId: string) => void;
   onOpenCardDetail: (cardId: string) => void;
   onDeleteCard: (cardId: string) => void;
 }) {
@@ -713,7 +677,7 @@ function SortableList({
     <div
       ref={setNodeRef}
       style={style}
-      className={`group flex w-72 shrink-0 flex-col rounded-lg border bg-card p-3 shadow-xs transition ${
+      className={`group/list flex w-72 shrink-0 flex-col rounded-lg border bg-card p-3 shadow-xs transition ${
         isDragging ? "opacity-60 shadow-md" : ""
       }`}
     >
@@ -748,7 +712,7 @@ function SortableList({
             <GripVertical className="h-4 w-4" />
           </span>
           <span className="flex-1 truncate font-semibold tracking-tight">{list.title}</span>
-          <div className="flex shrink-0 gap-0.5 opacity-0 transition group-hover:opacity-100">
+          <div className="flex shrink-0 gap-0.5 opacity-0 transition group-hover/list:opacity-100">
             <button type="button" onClick={onStartEdit} aria-label="Rename list" className={iconButtonClass}>
               <Pencil className="h-3.5 w-3.5" />
             </button>
@@ -774,10 +738,6 @@ function SortableList({
               assignableMembers={assignableMembers}
               showLabelText={showLabelText}
               onToggleLabelText={onToggleLabelText}
-              isEditingTitle={editingCardTitleId === card.id}
-              onStartRename={() => onStartRenameCard(card.id)}
-              onCancelRename={onCancelRenameCard}
-              onRename={onRenameCard}
               onOpenDetail={() => onOpenCardDetail(card.id)}
               onDelete={onDeleteCard}
             />
@@ -785,21 +745,14 @@ function SortableList({
         </ul>
       </SortableContext>
 
-      <form onSubmit={(event) => onAddCard(list.id, event)} className="flex flex-col gap-2">
-        <input
-          name="title"
-          placeholder="New card title"
-          required
-          className="rounded-md border bg-background px-2.5 py-1.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
-        />
-        <button
-          type="submit"
-          className="flex cursor-pointer items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground"
-        >
-          <Plus className="h-4 w-4" />
-          Add card
-        </button>
-      </form>
+      <button
+        type="button"
+        onClick={() => onAddCard(list.id)}
+        className="flex cursor-pointer items-center justify-center gap-1.5 rounded-md bg-primary px-2.5 py-1.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:bg-primary-hover active:scale-[0.98]"
+      >
+        <Plus className="h-4 w-4" />
+        Add card
+      </button>
     </div>
   );
 }
@@ -810,10 +763,6 @@ function SortableCard({
   assignableMembers,
   showLabelText,
   onToggleLabelText,
-  isEditingTitle,
-  onStartRename,
-  onCancelRename,
-  onRename,
   onOpenDetail,
   onDelete,
 }: {
@@ -822,10 +771,6 @@ function SortableCard({
   assignableMembers: AssignableMember[];
   showLabelText: boolean;
   onToggleLabelText: () => void;
-  isEditingTitle: boolean;
-  onStartRename: () => void;
-  onCancelRename: () => void;
-  onRename: (cardId: string, title: string) => void;
   onOpenDetail: () => void;
   onDelete: (cardId: string) => void;
 }) {
@@ -841,42 +786,11 @@ function SortableCard({
   const cardLabels = boardLabels.filter((label) => card.labelIds.includes(label.id));
   const cardMembers = assignableMembers.filter((member) => card.memberIds.includes(member.userId));
 
-  if (isEditingTitle) {
-    return (
-      <li ref={setNodeRef} style={style} className="rounded-md border bg-card p-2 text-sm shadow-xs">
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            const input = event.currentTarget.elements.namedItem("title") as HTMLInputElement;
-            onRename(card.id, input.value);
-          }}
-          className="flex gap-1.5"
-        >
-          <input
-            name="title"
-            defaultValue={card.title}
-            autoFocus
-            className="flex-1 rounded-md border bg-background px-2 py-1 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-ring/30"
-            onKeyDown={(event) => {
-              if (event.key === "Escape") onCancelRename();
-            }}
-          />
-          <button
-            type="submit"
-            className="cursor-pointer rounded-md bg-primary px-2.5 py-1 text-sm font-medium text-primary-foreground transition hover:bg-primary-hover"
-          >
-            Save
-          </button>
-        </form>
-      </li>
-    );
-  }
-
   return (
     <li
       ref={setNodeRef}
       style={style}
-      className={`group rounded-md border bg-card px-3 py-2.5 text-sm shadow-xs transition hover:shadow-md ${
+      className={`group/card rounded-md border bg-card px-3 py-2.5 text-sm shadow-xs transition hover:shadow-md ${
         isDragging ? "opacity-60 shadow-md" : ""
       }`}
     >
@@ -905,8 +819,8 @@ function SortableCard({
         <span {...attributes} {...listeners} className="flex-1 cursor-grab leading-snug">
           {card.title}
         </span>
-        <div className="flex shrink-0 gap-0.5 opacity-0 transition group-hover:opacity-100">
-          <button type="button" onClick={onStartRename} aria-label="Rename card" className={iconButtonClass}>
+        <div className="flex shrink-0 gap-0.5 opacity-0 transition group-hover/card:opacity-100">
+          <button type="button" onClick={onOpenDetail} aria-label="Edit card" className={iconButtonClass}>
             <Pencil className="h-3.5 w-3.5" />
           </button>
           <button
