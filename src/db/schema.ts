@@ -121,6 +121,8 @@ export const cards = pgTable("card", {
   description: text("description"),
   position: doublePrecision("position").notNull(),
   dueDate: timestamp("dueDate", { mode: "date" }),
+  // "task" | "backlog_item" — fixed set of card types, similar to Azure DevOps work item types.
+  type: text("type").notNull().default("task"),
   createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
 });
 

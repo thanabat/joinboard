@@ -69,6 +69,7 @@ export default async function BoardPage({
         title: card.title,
         description: card.description,
         dueDate: card.dueDate,
+        type: card.type as "task" | "backlog_item",
         labelIds: cardLabelRows
           .filter((row) => row.cardId === card.id)
           .map((row) => row.labelId),

@@ -36,6 +36,13 @@
       "when": 1783491557626,
       "tag": "0004_mean_chimera",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1783518241850,
+      "tag": "0005_same_ghost_rider",
+      "breakpoints": true
     }
   ]
 }

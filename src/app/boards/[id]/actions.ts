@@ -160,6 +160,18 @@ export async function moveCard(cardId: string, targetListId: string) {
   revalidatePath(`/boards/${board.id}`);
 }
 
+const CARD_TYPES = ["task", "backlog_item"] as const;
+
+export async function setCardType(cardId: string, type: string) {
+  const { board } = await requireCardAccess(cardId);
+  if (!CARD_TYPES.includes(type as (typeof CARD_TYPES)[number])) {
+    throw new Error("Invalid card type");
+  }
+
+  await db.update(cards).set({ type }).where(eq(cards.id, cardId));
+  revalidatePath(`/boards/${board.id}`);
+}
+
 export async function createLabel(boardId: string, name: string, color: string) {
   await requireBoardAccess(boardId);
 

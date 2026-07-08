@@ -19,6 +19,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import {
   AlignLeft,
+  Bookmark,
   Calendar,
   Check,
   Copy,
@@ -27,6 +28,7 @@ import {
   ListChecks,
   Pencil,
   Plus,
+  SquareCheck,
   Tag,
   Trash2,
   Users,
@@ -53,6 +55,7 @@ import {
   revokeInviteLink,
   setCardLabel,
   setCardMember,
+  setCardType,
   toggleChecklistItem,
   unblockMember,
   updateCard,
@@ -61,6 +64,7 @@ import {
 
 type Label = { id: string; name: string; color: string };
 type ChecklistItem = { id: string; title: string; completed: boolean };
+type CardType = "task" | "backlog_item";
 type CardItem = {
   id: string;
   title: string;
@@ -69,6 +73,12 @@ type CardItem = {
   labelIds: string[];
   memberIds: string[];
   checklistItems: ChecklistItem[];
+  type: CardType;
+};
+
+const CARD_TYPES: Record<CardType, { label: string; icon: typeof SquareCheck; color: string }> = {
+  task: { label: "Task", icon: SquareCheck, color: "#4f46e5" },
+  backlog_item: { label: "Product Backlog Item", icon: Bookmark, color: "#d97706" },
 };
 type ListData = { id: string; title: string; cards: CardItem[] };
 type CardUpdates = { title: string; description: string | null; dueDate: string | null };
@@ -285,6 +295,7 @@ export function Board({
                   labelIds: [],
                   memberIds: [],
                   checklistItems: [],
+                  type: card.type as CardType,
                 },
               ],
             }
@@ -359,6 +370,16 @@ export function Board({
       });
     });
     await moveCard(cardId, targetListId);
+  }
+
+  async function handleSetCardType(cardId: string, type: CardType) {
+    setLists((prev) =>
+      prev.map((list) => ({
+        ...list,
+        cards: list.cards.map((card) => (card.id === cardId ? { ...card, type } : card)),
+      })),
+    );
+    await setCardType(cardId, type);
   }
 
   async function handleCreateLabel(name: string, color: string) {
@@ -612,6 +633,7 @@ export function Board({
             onRenameChecklistItem={handleRenameChecklistItem}
             onToggleChecklistItem={handleToggleChecklistItem}
             onDeleteChecklistItem={handleDeleteChecklistItem}
+            onSetType={handleSetCardType}
           />
         )}
       </DndContext>
@@ -785,6 +807,8 @@ function SortableCard({
 
   const cardLabels = boardLabels.filter((label) => card.labelIds.includes(label.id));
   const cardMembers = assignableMembers.filter((member) => card.memberIds.includes(member.userId));
+  const cardType = CARD_TYPES[card.type];
+  const CardTypeIcon = cardType.icon;
 
   return (
     <li
@@ -794,6 +818,16 @@ function SortableCard({
         isDragging ? "opacity-60 shadow-md" : ""
       }`}
     >
+      <div className="mb-1.5">
+        <span
+          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium"
+          style={{ color: cardType.color, backgroundColor: `${cardType.color}1a` }}
+        >
+          <CardTypeIcon className="h-3 w-3" />
+          {cardType.label}
+        </span>
+      </div>
+
       {cardLabels.length > 0 && (
         <div className="mb-1.5 flex flex-wrap gap-1">
           {cardLabels.map((label) => (
@@ -908,6 +942,7 @@ function CardDetailModal({
   onRenameChecklistItem,
   onToggleChecklistItem,
   onDeleteChecklistItem,
+  onSetType,
 }: {
   card: CardItem;
   boardLabels: Label[];
@@ -927,6 +962,7 @@ function CardDetailModal({
   onRenameChecklistItem: (cardId: string, itemId: string, title: string) => void;
   onToggleChecklistItem: (cardId: string, itemId: string, completed: boolean) => void;
   onDeleteChecklistItem: (cardId: string, itemId: string) => void;
+  onSetType: (cardId: string, type: CardType) => void;
 }) {
   const newLabelNameRef = useRef<HTMLInputElement>(null);
   const newLabelColorRef = useRef<HTMLInputElement>(null);
@@ -967,7 +1003,7 @@ function CardDetailModal({
         role="dialog"
         aria-modal="true"
         onClick={(event) => event.stopPropagation()}
-        className="animate-modal-in w-full max-w-md rounded-lg border bg-card p-5 shadow-lg"
+        className="animate-modal-in max-h-[85vh] w-full max-w-md overflow-y-auto rounded-lg border bg-card p-5 shadow-lg"
       >
         <form
           onSubmit={(event) => {
@@ -1000,6 +1036,38 @@ function CardDetailModal({
               className="rounded-md border bg-background px-2.5 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
             />
           </label>
+
+          <div className="flex flex-col gap-1.5">
+            <span className="text-sm font-medium text-muted-foreground">Type</span>
+            <div className="flex flex-wrap gap-1.5">
+              {(Object.entries(CARD_TYPES) as [CardType, (typeof CARD_TYPES)[CardType]][]).map(
+                ([value, config]) => {
+                  const selected = card.type === value;
+                  const TypeIcon = config.icon;
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => onSetType(card.id, value)}
+                      style={
+                        selected
+                          ? { backgroundColor: config.color, borderColor: config.color }
+                          : { borderColor: config.color, color: config.color }
+                      }
+                      className={
+                        selected
+                          ? "flex cursor-pointer items-center gap-1.5 rounded-full border-2 px-2.5 py-1 text-left text-xs font-medium text-white transition"
+                          : "flex cursor-pointer items-center gap-1.5 rounded-full border-2 bg-transparent px-2.5 py-1 text-left text-xs font-medium transition"
+                      }
+                    >
+                      <TypeIcon className="h-3.5 w-3.5" />
+                      {config.label}
+                    </button>
+                  );
+                },
+              )}
+            </div>
+          </div>
 
           <div className="grid grid-cols-2 gap-3">
             <label className="flex flex-col gap-1.5 text-sm font-medium text-muted-foreground">
