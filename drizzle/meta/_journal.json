@@ -50,6 +50,13 @@
       "when": 1783521873506,
       "tag": "0006_lame_vision",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1783523430041,
+      "tag": "0007_huge_speed",
+      "breakpoints": true
     }
   ]
 }

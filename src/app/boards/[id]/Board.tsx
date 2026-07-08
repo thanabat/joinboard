@@ -22,8 +22,11 @@ import {
   Bookmark,
   Calendar,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Copy,
   GripVertical,
+  History,
   Link2,
   ListChecks,
   Pencil,
@@ -95,6 +98,7 @@ type ListData = { id: string; title: string; cards: CardItem[] };
 type CardUpdates = { title: string; description: string | null; dueDate: string | null };
 type Member = { userId: string; email: string; status: string };
 type AssignableMember = { userId: string; email: string };
+type Activity = { id: string; message: string; actorEmail: string; createdAt: Date };
 
 // Hoisted so this object's identity is stable across renders — passing a
 // fresh literal here every render defeats dnd-kit's sensor memoization and
@@ -106,12 +110,98 @@ const iconButtonClass =
 
 const MAX_VISIBLE_AVATARS = 10;
 
+// Matches the fetch limit in page.tsx, so a long-running session never grows
+// the feed past what a fresh page load would show anyway.
+const MAX_ACTIVITIES = 200;
+
 function avatarColor(seed: string) {
   let hash = 0;
   for (let i = 0; i < seed.length; i++) {
     hash = seed.charCodeAt(i) + ((hash << 5) - hash);
   }
   return `hsl(${Math.abs(hash) % 360}, 60%, 45%)`;
+}
+
+function timeAgo(date: Date) {
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return date.toLocaleDateString();
+}
+
+function ActivitySidebar({
+  activities,
+  collapsed,
+  onToggleCollapsed,
+}: {
+  activities: Activity[];
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
+}) {
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        onClick={onToggleCollapsed}
+        aria-label="Show activity"
+        className="flex w-10 shrink-0 cursor-pointer flex-col items-center gap-1.5 rounded-lg border bg-card py-3 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+      >
+        <ChevronLeft className="h-4 w-4" />
+        <History className="h-4 w-4" />
+      </button>
+    );
+  }
+
+  return (
+    <aside className="flex w-72 shrink-0 flex-col gap-3 overflow-y-auto rounded-lg border bg-card p-3">
+      <div className="flex items-center justify-between">
+        <span className="flex items-center gap-1.5 text-sm font-semibold tracking-tight">
+          <History className="h-4 w-4" />
+          Activity
+        </span>
+        <button
+          type="button"
+          onClick={onToggleCollapsed}
+          aria-label="Hide activity"
+          className={iconButtonClass}
+        >
+          <ChevronRight className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      {activities.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No activity yet.</p>
+      ) : (
+        <ul className="flex flex-col gap-3">
+          {activities.map((activity) => (
+            <li key={activity.id} className="flex gap-2">
+              <span
+                style={{ backgroundColor: avatarColor(activity.actorEmail) }}
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+              >
+                {activity.actorEmail.charAt(0).toUpperCase()}
+              </span>
+              <div className="flex flex-col gap-0.5 text-sm">
+                <span className="leading-snug">
+                  <span className="font-medium">{activity.actorEmail}</span> {activity.message}
+                </span>
+                <span className="text-xs text-muted-foreground">{timeAgo(activity.createdAt)}</span>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      {activities.length >= MAX_ACTIVITIES && (
+        <p className="text-center text-xs text-muted-foreground/70">
+          Showing the most recent {MAX_ACTIVITIES} activities
+        </p>
+      )}
+    </aside>
+  );
 }
 
 function MemberAvatarStack({
@@ -172,6 +262,7 @@ export function Board({
   initialInviteToken,
   assignableMembers,
   currentUserId,
+  initialActivities,
 }: {
   boardId: string;
   initialLists: ListData[];
@@ -182,6 +273,7 @@ export function Board({
   initialInviteToken: string | null;
   assignableMembers: AssignableMember[];
   currentUserId: string;
+  initialActivities: Activity[];
 }) {
   const [lists, setLists] = useState(initialLists);
   const [boardLabels, setBoardLabels] = useState(initialLabels);
@@ -191,8 +283,21 @@ export function Board({
   const [editingListId, setEditingListId] = useState<string | null>(null);
   const [detailCardId, setDetailCardId] = useState<string | null>(null);
   const [showMembers, setShowMembers] = useState(false);
+  const [activities, setActivities] = useState(initialActivities);
+  const [activityCollapsed, setActivityCollapsed] = useState(false);
   const [, startTransition] = useTransition();
   const sensors = useSensors(useSensor(PointerSensor, POINTER_SENSOR_OPTIONS));
+
+  function pushActivity(activity: { id: string; message: string; createdAt: Date } | undefined) {
+    if (!activity) return;
+    const actorEmail = assignableMembers.find((member) => member.userId === currentUserId)?.email ?? "Someone";
+    setActivities((prev) =>
+      [{ id: activity.id, message: activity.message, actorEmail, createdAt: activity.createdAt }, ...prev].slice(
+        0,
+        MAX_ACTIVITIES,
+      ),
+    );
+  }
 
   function findListByCardId(cardId: string) {
     return lists.find((list) => list.cards.some((card) => card.id === cardId));
@@ -273,7 +378,7 @@ export function Board({
       reorderCards(
         boardId,
         finalCards.map((card, index) => ({ id: card.id, listId: list.id, position: index })),
-      );
+      ).then(({ activity }) => pushActivity(activity));
     });
   }
 
@@ -285,12 +390,13 @@ export function Board({
     if (!title) return;
     input.value = "";
 
-    const list = await createList(boardId, title);
+    const { list, activity } = await createList(boardId, title);
     setLists((prev) => [...prev, { id: list.id, title: list.title, cards: [] }]);
+    pushActivity(activity);
   }
 
   async function handleAddCard(listId: string) {
-    const card = await createCard(listId, "New card");
+    const { card, activity } = await createCard(listId, "New card");
     setLists((prev) =>
       prev.map((list) =>
         list.id === listId
@@ -315,6 +421,7 @@ export function Board({
       ),
     );
     setDetailCardId(card.id);
+    pushActivity(activity);
   }
 
   async function handleRenameList(listId: string, title: string) {
@@ -325,13 +432,15 @@ export function Board({
     }
     setLists((prev) => prev.map((l) => (l.id === listId ? { ...l, title: trimmed } : l)));
     setEditingListId(null);
-    await updateList(listId, trimmed);
+    const { activity } = await updateList(listId, trimmed);
+    pushActivity(activity);
   }
 
   async function handleDeleteList(listId: string) {
     if (!window.confirm("Delete this list and all its cards?")) return;
     setLists((prev) => prev.filter((l) => l.id !== listId));
-    await deleteList(listId);
+    const { activity } = await deleteList(listId);
+    pushActivity(activity);
   }
 
   async function handleSaveCardDetail(cardId: string, updates: CardUpdates) {
@@ -353,7 +462,8 @@ export function Board({
       })),
     );
     setDetailCardId(null);
-    await updateCard(cardId, { ...updates, title: trimmed });
+    const { activity } = await updateCard(cardId, { ...updates, title: trimmed });
+    pushActivity(activity);
   }
 
   async function handleDeleteCard(cardId: string) {
@@ -362,7 +472,8 @@ export function Board({
       prev.map((list) => ({ ...list, cards: list.cards.filter((c) => c.id !== cardId) })),
     );
     setDetailCardId(null);
-    await deleteCard(cardId);
+    const { activity } = await deleteCard(cardId);
+    pushActivity(activity);
   }
 
   async function handleMoveCard(cardId: string, targetListId: string) {
@@ -381,7 +492,8 @@ export function Board({
         return list;
       });
     });
-    await moveCard(cardId, targetListId);
+    const { activity } = await moveCard(cardId, targetListId);
+    pushActivity(activity);
   }
 
   async function handleSetCardType(cardId: string, type: CardType) {
@@ -391,12 +503,13 @@ export function Board({
         cards: list.cards.map((card) => (card.id === cardId ? { ...card, type } : card)),
       })),
     );
-    await setCardType(cardId, type);
+    const { activity } = await setCardType(cardId, type);
+    pushActivity(activity);
   }
 
   async function handleLinkCard(cardId: string, targetCardId: string, relation: LinkRelation) {
     try {
-      const link = await linkCards(cardId, targetCardId, relation);
+      const { link, activity } = await linkCards(cardId, targetCardId, relation);
       if (!link) return;
       setLists((prev) =>
         prev.map((list) => ({
@@ -420,6 +533,7 @@ export function Board({
           }),
         })),
       );
+      pushActivity(activity);
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "Couldn't link cards");
     }
@@ -435,12 +549,14 @@ export function Board({
         })),
       })),
     );
-    await unlinkCards(linkId);
+    const { activity } = await unlinkCards(linkId);
+    pushActivity(activity);
   }
 
   async function handleCreateLabel(name: string, color: string) {
-    const label = await createLabel(boardId, name, color);
+    const { label, activity } = await createLabel(boardId, name, color);
     setBoardLabels((prev) => [...prev, label]);
+    pushActivity(activity);
   }
 
   async function handleDeleteLabel(labelId: string) {
@@ -455,7 +571,8 @@ export function Board({
         })),
       })),
     );
-    await deleteLabel(labelId);
+    const { activity } = await deleteLabel(labelId);
+    pushActivity(activity);
   }
 
   async function handleToggleCardLabel(cardId: string, labelId: string, assigned: boolean) {
@@ -474,7 +591,8 @@ export function Board({
         ),
       })),
     );
-    await setCardLabel(cardId, labelId, assigned);
+    const { activity } = await setCardLabel(cardId, labelId, assigned);
+    pushActivity(activity);
   }
 
   async function handleToggleCardMember(cardId: string, userId: string, assigned: boolean) {
@@ -493,13 +611,14 @@ export function Board({
         ),
       })),
     );
-    await setCardMember(cardId, userId, assigned);
+    const { activity } = await setCardMember(cardId, userId, assigned);
+    pushActivity(activity);
   }
 
   async function handleAddChecklistItem(cardId: string, title: string) {
     const trimmed = title.trim();
     if (!trimmed) return;
-    const item = await createChecklistItem(cardId, trimmed);
+    const { item, activity } = await createChecklistItem(cardId, trimmed);
     setLists((prev) =>
       prev.map((list) => ({
         ...list,
@@ -510,6 +629,7 @@ export function Board({
         ),
       })),
     );
+    pushActivity(activity);
   }
 
   async function handleRenameChecklistItem(cardId: string, itemId: string, title: string) {
@@ -549,7 +669,8 @@ export function Board({
         ),
       })),
     );
-    await toggleChecklistItem(itemId, completed);
+    const { activity } = await toggleChecklistItem(itemId, completed);
+    pushActivity(activity);
   }
 
   async function handleDeleteChecklistItem(cardId: string, itemId: string) {
@@ -563,13 +684,15 @@ export function Board({
         ),
       })),
     );
-    await deleteChecklistItem(itemId);
+    const { activity } = await deleteChecklistItem(itemId);
+    pushActivity(activity);
   }
 
   async function handleInvite(email: string) {
     try {
-      const member = await inviteMember(boardId, email);
+      const { activity, ...member } = await inviteMember(boardId, email);
       setMembers((prev) => [...prev.filter((m) => m.userId !== member.userId), member]);
+      pushActivity(activity);
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "Couldn't send the invite");
     }
@@ -578,7 +701,8 @@ export function Board({
   async function handleRemoveMember(userId: string) {
     if (!window.confirm("Remove this member from the board?")) return;
     setMembers((prev) => prev.filter((m) => m.userId !== userId));
-    await removeMember(boardId, userId);
+    const { activity } = await removeMember(boardId, userId);
+    pushActivity(activity);
   }
 
   async function handleBlockMember(userId: string) {
@@ -586,23 +710,27 @@ export function Board({
     setMembers((prev) =>
       prev.map((m) => (m.userId === userId ? { ...m, status: "blocked" } : m)),
     );
-    await blockMember(boardId, userId);
+    const { activity } = await blockMember(boardId, userId);
+    pushActivity(activity);
   }
 
   async function handleUnblockMember(userId: string) {
     setMembers((prev) => prev.filter((m) => m.userId !== userId));
-    await unblockMember(boardId, userId);
+    const { activity } = await unblockMember(boardId, userId);
+    pushActivity(activity);
   }
 
   async function handleGenerateInviteLink() {
-    const token = await generateInviteLink(boardId);
+    const { token, activity } = await generateInviteLink(boardId);
     setInviteToken(token);
+    pushActivity(activity);
   }
 
   async function handleRevokeInviteLink() {
     if (!window.confirm("Revoke this invite link? It will stop working immediately.")) return;
     setInviteToken(null);
-    await revokeInviteLink(boardId);
+    const { activity } = await revokeInviteLink(boardId);
+    pushActivity(activity);
   }
 
   const detailCard = lists.flatMap((list) => list.cards).find((card) => card.id === detailCardId);
@@ -611,108 +739,115 @@ export function Board({
   )?.id;
 
   return (
-    <div className="flex flex-1 flex-col gap-4">
-      <div>
-        <MemberAvatarStack
-          ownerEmail={ownerEmail}
-          members={members}
-          onClick={() => setShowMembers(true)}
-        />
-      </div>
-
-      <DndContext
-        id={boardId}
-        sensors={sensors}
-        collisionDetection={closestCorners}
-        onDragOver={handleDragOver}
-        onDragEnd={handleDragEnd}
-      >
-        <div className="flex flex-1 items-start gap-4 overflow-x-auto pb-4">
-          <SortableContext items={lists.map((list) => list.id)} strategy={horizontalListSortingStrategy}>
-            {lists.map((list) => (
-              <SortableList
-                key={list.id}
-                list={list}
-                boardLabels={boardLabels}
-                assignableMembers={assignableMembers}
-                showLabelText={showLabelText}
-                onToggleLabelText={() => setShowLabelText((prev) => !prev)}
-                isEditing={editingListId === list.id}
-                onStartEdit={() => setEditingListId(list.id)}
-                onCancelEdit={() => setEditingListId(null)}
-                onRename={handleRenameList}
-                onDelete={handleDeleteList}
-                onAddCard={handleAddCard}
-                onOpenCardDetail={setDetailCardId}
-                onDeleteCard={handleDeleteCard}
-              />
-            ))}
-          </SortableContext>
-
-          <form
-            onSubmit={handleAddList}
-            className="flex w-72 shrink-0 flex-col gap-2 rounded-lg border border-dashed p-3"
-          >
-            <input
-              name="title"
-              placeholder="New list title"
-              required
-              className="rounded-md border bg-card px-2.5 py-1.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
-            />
-            <button
-              type="submit"
-              className="flex cursor-pointer items-center justify-center gap-1.5 rounded-md bg-primary px-2.5 py-1.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:bg-primary-hover active:scale-[0.98]"
-            >
-              <Plus className="h-4 w-4" />
-              Add list
-            </button>
-          </form>
+    <div className="flex flex-1 gap-4 overflow-hidden">
+      <div className="flex flex-1 flex-col gap-4 overflow-hidden">
+        <div>
+          <MemberAvatarStack
+            ownerEmail={ownerEmail}
+            members={members}
+            onClick={() => setShowMembers(true)}
+          />
         </div>
 
-        {detailCard && detailCardListId && (
-          <CardDetailModal
-            key={detailCard.id}
-            card={detailCard}
-            boardLabels={boardLabels}
-            assignableMembers={assignableMembers}
-            currentUserId={currentUserId}
-            lists={lists}
-            currentListId={detailCardListId}
-            onClose={() => setDetailCardId(null)}
-            onSave={handleSaveCardDetail}
-            onDelete={handleDeleteCard}
-            onToggleLabel={handleToggleCardLabel}
-            onCreateLabel={handleCreateLabel}
-            onDeleteLabel={handleDeleteLabel}
-            onMove={handleMoveCard}
-            onToggleMember={handleToggleCardMember}
-            onAddChecklistItem={handleAddChecklistItem}
-            onRenameChecklistItem={handleRenameChecklistItem}
-            onToggleChecklistItem={handleToggleChecklistItem}
-            onDeleteChecklistItem={handleDeleteChecklistItem}
-            onSetType={handleSetCardType}
-            onLinkCard={handleLinkCard}
-            onUnlinkCard={handleUnlinkCard}
-            onNavigateToCard={setDetailCardId}
+        <DndContext
+          id={boardId}
+          sensors={sensors}
+          collisionDetection={closestCorners}
+          onDragOver={handleDragOver}
+          onDragEnd={handleDragEnd}
+        >
+          <div className="flex flex-1 items-start gap-4 overflow-x-auto pb-4">
+            <SortableContext items={lists.map((list) => list.id)} strategy={horizontalListSortingStrategy}>
+              {lists.map((list) => (
+                <SortableList
+                  key={list.id}
+                  list={list}
+                  boardLabels={boardLabels}
+                  assignableMembers={assignableMembers}
+                  showLabelText={showLabelText}
+                  onToggleLabelText={() => setShowLabelText((prev) => !prev)}
+                  isEditing={editingListId === list.id}
+                  onStartEdit={() => setEditingListId(list.id)}
+                  onCancelEdit={() => setEditingListId(null)}
+                  onRename={handleRenameList}
+                  onDelete={handleDeleteList}
+                  onAddCard={handleAddCard}
+                  onOpenCardDetail={setDetailCardId}
+                  onDeleteCard={handleDeleteCard}
+                />
+              ))}
+            </SortableContext>
+
+            <form
+              onSubmit={handleAddList}
+              className="flex w-72 shrink-0 flex-col gap-2 rounded-lg border border-dashed p-3"
+            >
+              <input
+                name="title"
+                placeholder="New list title"
+                required
+                className="rounded-md border bg-card px-2.5 py-1.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
+              />
+              <button
+                type="submit"
+                className="flex cursor-pointer items-center justify-center gap-1.5 rounded-md bg-primary px-2.5 py-1.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:bg-primary-hover active:scale-[0.98]"
+              >
+                <Plus className="h-4 w-4" />
+                Add list
+              </button>
+            </form>
+          </div>
+
+          {detailCard && detailCardListId && (
+            <CardDetailModal
+              key={detailCard.id}
+              card={detailCard}
+              boardLabels={boardLabels}
+              assignableMembers={assignableMembers}
+              currentUserId={currentUserId}
+              lists={lists}
+              currentListId={detailCardListId}
+              onClose={() => setDetailCardId(null)}
+              onSave={handleSaveCardDetail}
+              onDelete={handleDeleteCard}
+              onToggleLabel={handleToggleCardLabel}
+              onCreateLabel={handleCreateLabel}
+              onDeleteLabel={handleDeleteLabel}
+              onMove={handleMoveCard}
+              onToggleMember={handleToggleCardMember}
+              onAddChecklistItem={handleAddChecklistItem}
+              onRenameChecklistItem={handleRenameChecklistItem}
+              onToggleChecklistItem={handleToggleChecklistItem}
+              onDeleteChecklistItem={handleDeleteChecklistItem}
+              onSetType={handleSetCardType}
+              onLinkCard={handleLinkCard}
+              onUnlinkCard={handleUnlinkCard}
+              onNavigateToCard={setDetailCardId}
+            />
+          )}
+        </DndContext>
+
+        {showMembers && (
+          <MembersModal
+            isAdmin={isAdmin}
+            ownerEmail={ownerEmail}
+            members={members}
+            inviteToken={inviteToken}
+            onClose={() => setShowMembers(false)}
+            onInvite={handleInvite}
+            onRemove={handleRemoveMember}
+            onBlock={handleBlockMember}
+            onUnblock={handleUnblockMember}
+            onGenerateInviteLink={handleGenerateInviteLink}
+            onRevokeInviteLink={handleRevokeInviteLink}
           />
         )}
-      </DndContext>
-
-      {showMembers && (
-        <MembersModal
-          isAdmin={isAdmin}
-          ownerEmail={ownerEmail}
-          members={members}
-          inviteToken={inviteToken}
-          onClose={() => setShowMembers(false)}
-          onInvite={handleInvite}
-          onRemove={handleRemoveMember}
-          onBlock={handleBlockMember}
-          onUnblock={handleUnblockMember}
-          onGenerateInviteLink={handleGenerateInviteLink}
-          onRevokeInviteLink={handleRevokeInviteLink}
-        />
-      )}
+      </div>
+      <ActivitySidebar
+        activities={activities}
+        collapsed={activityCollapsed}
+        onToggleCollapsed={() => setActivityCollapsed((prev) => !prev)}
+      />
     </div>
   );
 }

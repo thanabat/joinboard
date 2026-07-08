@@ -185,3 +185,18 @@ export const cardLinks = pgTable("cardLink", {
   type: text("type").notNull(),
   createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
 });
+
+export const activities = pgTable("activity", {
+  id: id(),
+  boardId: text("boardId")
+    .notNull()
+    .references(() => boards.id, { onDelete: "cascade" }),
+  userId: text("userId")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  // Nullable + set-null on delete so the log entry (with its human-readable
+  // message) survives even after the card it refers to is deleted.
+  cardId: text("cardId").references(() => cards.id, { onDelete: "set null" }),
+  message: text("message").notNull(),
+  createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
+});

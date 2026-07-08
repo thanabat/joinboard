@@ -1,6 +1,6 @@
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { boardMembers, boards, cardLabels, cardLinks, cardMembers, cards, checklistItems, labels, lists, users } from "@/db/schema";
+import { activities, boardMembers, boards, cardLabels, cardLinks, cardMembers, cards, checklistItems, labels, lists, users } from "@/db/schema";
 import { eq, inArray, and, or } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import Link from "next/link";
@@ -126,6 +126,22 @@ export default async function BoardPage({
       })),
   ];
 
+  const activityRows = await db.query.activities.findMany({
+    where: eq(activities.boardId, id),
+    orderBy: (activity, { desc }) => desc(activity.createdAt),
+    limit: 200,
+  });
+  const activityUserIds = [...new Set(activityRows.map((row) => row.userId))];
+  const activityUsers = activityUserIds.length
+    ? await db.query.users.findMany({ where: inArray(users.id, activityUserIds) })
+    : [];
+  const initialActivities = activityRows.map((row) => ({
+    id: row.id,
+    message: row.message,
+    actorEmail: activityUsers.find((user) => user.id === row.userId)?.email ?? "(unknown)",
+    createdAt: row.createdAt,
+  }));
+
   return (
     <div className="flex flex-1 flex-col">
       <header className="sticky top-0 z-10 border-b bg-card/80 backdrop-blur-sm">
@@ -152,6 +168,7 @@ export default async function BoardPage({
           initialInviteToken={board.inviteToken}
           assignableMembers={assignableMembers}
           currentUserId={userId}
+          initialActivities={initialActivities}
         />
       </main>
     </div>
