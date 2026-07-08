@@ -96,9 +96,9 @@ const LINK_RELATION_LABELS: Record<LinkRelation, string> = {
 };
 type ListData = { id: string; title: string; cards: CardItem[] };
 type CardUpdates = { title: string; description: string | null; dueDate: string | null };
-type Member = { userId: string; email: string; status: string };
-type AssignableMember = { userId: string; email: string };
-type Activity = { id: string; message: string; actorEmail: string; createdAt: Date };
+type Member = { userId: string; email: string; displayName: string; status: string };
+type AssignableMember = { userId: string; email: string; displayName: string };
+type Activity = { id: string; message: string; actorName: string; createdAt: Date };
 
 // Hoisted so this object's identity is stable across renders — passing a
 // fresh literal here every render defeats dnd-kit's sensor memoization and
@@ -180,14 +180,14 @@ function ActivitySidebar({
           {activities.map((activity) => (
             <li key={activity.id} className="flex gap-2">
               <span
-                style={{ backgroundColor: avatarColor(activity.actorEmail) }}
+                style={{ backgroundColor: avatarColor(activity.actorName) }}
                 className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white"
               >
-                {activity.actorEmail.charAt(0).toUpperCase()}
+                {activity.actorName.charAt(0).toUpperCase()}
               </span>
               <div className="flex flex-col gap-0.5 text-sm">
                 <span className="leading-snug">
-                  <span className="font-medium">{activity.actorEmail}</span> {activity.message}
+                  <span className="font-medium">{activity.actorName}</span> {activity.message}
                 </span>
                 <span className="text-xs text-muted-foreground">{timeAgo(activity.createdAt)}</span>
               </div>
@@ -205,17 +205,19 @@ function ActivitySidebar({
 }
 
 function MemberAvatarStack({
-  ownerEmail,
+  ownerDisplayName,
   members,
   onClick,
 }: {
-  ownerEmail: string;
+  ownerDisplayName: string;
   members: Member[];
   onClick: () => void;
 }) {
   const people = [
-    { email: ownerEmail, isAdmin: true },
-    ...members.filter((m) => m.status === "active").map((m) => ({ email: m.email, isAdmin: false })),
+    { key: "owner", name: ownerDisplayName, isAdmin: true },
+    ...members
+      .filter((m) => m.status === "active")
+      .map((m) => ({ key: m.userId, name: m.displayName, isAdmin: false })),
   ];
   const visible = people.slice(0, MAX_VISIBLE_AVATARS);
   const overflow = people.length - visible.length;
@@ -230,12 +232,12 @@ function MemberAvatarStack({
       <div className="flex -space-x-2">
         {visible.map((person) => (
           <span
-            key={person.email}
-            title={person.email}
-            style={{ backgroundColor: person.isAdmin ? "var(--primary)" : avatarColor(person.email) }}
+            key={person.key}
+            title={person.name}
+            style={{ backgroundColor: person.isAdmin ? "var(--primary)" : avatarColor(person.name) }}
             className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 border-card text-xs font-semibold text-white"
           >
-            {person.email.charAt(0).toUpperCase()}
+            {person.name.charAt(0).toUpperCase()}
           </span>
         ))}
         {overflow > 0 && (
@@ -258,6 +260,7 @@ export function Board({
   initialLabels,
   isAdmin,
   ownerEmail,
+  ownerDisplayName,
   initialMembers,
   initialInviteToken,
   assignableMembers,
@@ -269,6 +272,7 @@ export function Board({
   initialLabels: Label[];
   isAdmin: boolean;
   ownerEmail: string;
+  ownerDisplayName: string;
   initialMembers: Member[];
   initialInviteToken: string | null;
   assignableMembers: AssignableMember[];
@@ -290,9 +294,10 @@ export function Board({
 
   function pushActivity(activity: { id: string; message: string; createdAt: Date } | undefined) {
     if (!activity) return;
-    const actorEmail = assignableMembers.find((member) => member.userId === currentUserId)?.email ?? "Someone";
+    const actorName =
+      assignableMembers.find((member) => member.userId === currentUserId)?.displayName ?? "Someone";
     setActivities((prev) =>
-      [{ id: activity.id, message: activity.message, actorEmail, createdAt: activity.createdAt }, ...prev].slice(
+      [{ id: activity.id, message: activity.message, actorName, createdAt: activity.createdAt }, ...prev].slice(
         0,
         MAX_ACTIVITIES,
       ),
@@ -743,7 +748,7 @@ export function Board({
       <div className="flex flex-1 flex-col gap-4 overflow-hidden">
         <div>
           <MemberAvatarStack
-            ownerEmail={ownerEmail}
+            ownerDisplayName={ownerDisplayName}
             members={members}
             onClick={() => setShowMembers(true)}
           />
@@ -830,7 +835,7 @@ export function Board({
         {showMembers && (
           <MembersModal
             isAdmin={isAdmin}
-            ownerEmail={ownerEmail}
+            ownerDisplayName={ownerDisplayName}
             members={members}
             inviteToken={inviteToken}
             onClose={() => setShowMembers(false)}
@@ -1105,11 +1110,11 @@ function SortableCard({
           {cardMembers.map((member) => (
             <span
               key={member.userId}
-              title={member.email}
-              style={{ backgroundColor: avatarColor(member.email) }}
+              title={member.displayName}
+              style={{ backgroundColor: avatarColor(member.displayName) }}
               className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-card text-[10px] font-semibold text-white"
             >
-              {member.email.charAt(0).toUpperCase()}
+              {member.displayName.charAt(0).toUpperCase()}
             </span>
           ))}
         </div>
@@ -1191,12 +1196,14 @@ function CardDetailModal({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
 
-  const unassignedMembers = assignableMembers.filter(
-    (member) =>
+  const unassignedMembers = assignableMembers.filter((member) => {
+    const query = memberQuery.trim().toLowerCase();
+    return (
       member.userId !== currentUserId &&
       !card.memberIds.includes(member.userId) &&
-      member.email.toLowerCase().includes(memberQuery.trim().toLowerCase()),
-  );
+      (member.displayName.toLowerCase().includes(query) || member.email.toLowerCase().includes(query))
+    );
+  });
 
   const allCards = lists.flatMap((list) => list.cards);
   const linkedCardIds = new Set(card.links.map((link) => link.otherCardId));
@@ -1397,17 +1404,17 @@ function CardDetailModal({
                     <button
                       key={member.userId}
                       type="button"
-                      title={member.email}
+                      title={member.displayName}
                       onClick={() => onToggleMember(card.id, member.userId, false)}
                       className="flex cursor-pointer items-center gap-1.5 rounded-full border-2 border-primary bg-primary-tint py-0.5 pl-0.5 pr-2.5 text-xs font-medium text-primary transition"
                     >
                       <span
-                        style={{ backgroundColor: avatarColor(member.email) }}
+                        style={{ backgroundColor: avatarColor(member.displayName) }}
                         className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white"
                       >
-                        {member.email.charAt(0).toUpperCase()}
+                        {member.displayName.charAt(0).toUpperCase()}
                       </span>
-                      {isSelf ? "Leave" : `Remove ${member.email}`}
+                      {isSelf ? "Leave" : `Remove ${member.displayName}`}
                     </button>
                   );
                 })}
@@ -1451,12 +1458,12 @@ function CardDetailModal({
                         className="flex w-full cursor-pointer items-center gap-2 px-2.5 py-1.5 text-left text-sm transition hover:bg-muted"
                       >
                         <span
-                          style={{ backgroundColor: avatarColor(member.email) }}
+                          style={{ backgroundColor: avatarColor(member.displayName) }}
                           className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white"
                         >
-                          {member.email.charAt(0).toUpperCase()}
+                          {member.displayName.charAt(0).toUpperCase()}
                         </span>
-                        {member.email}
+                        {member.displayName}
                       </button>
                     ))
                   ) : (
@@ -1735,7 +1742,7 @@ function statusLabel(status: string) {
 
 function MembersModal({
   isAdmin,
-  ownerEmail,
+  ownerDisplayName,
   members,
   inviteToken,
   onClose,
@@ -1747,7 +1754,7 @@ function MembersModal({
   onRevokeInviteLink,
 }: {
   isAdmin: boolean;
-  ownerEmail: string;
+  ownerDisplayName: string;
   members: Member[];
   inviteToken: string | null;
   onClose: () => void;
@@ -1802,9 +1809,9 @@ function MembersModal({
         <ul className="mb-4 flex flex-col gap-2">
           <li className="flex items-center gap-3 rounded-md bg-muted px-3 py-2 text-sm">
             <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
-              {ownerEmail.charAt(0).toUpperCase()}
+              {ownerDisplayName.charAt(0).toUpperCase()}
             </span>
-            <span className="flex-1 truncate">{ownerEmail}</span>
+            <span className="flex-1 truncate">{ownerDisplayName}</span>
             <span className="rounded-full bg-primary-tint px-2 py-0.5 text-xs font-medium text-primary">
               Admin
             </span>
@@ -1815,12 +1822,12 @@ function MembersModal({
               className="flex items-center gap-3 rounded-md bg-muted px-3 py-2 text-sm"
             >
               <span
-                style={{ backgroundColor: avatarColor(member.email) }}
+                style={{ backgroundColor: avatarColor(member.displayName) }}
                 className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white"
               >
-                {member.email.charAt(0).toUpperCase()}
+                {member.displayName.charAt(0).toUpperCase()}
               </span>
-              <span className="flex-1 truncate">{member.email}</span>
+              <span className="flex-1 truncate">{member.displayName}</span>
               <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusBadgeClass(member.status)}`}>
                 {statusLabel(member.status)}
               </span>

@@ -23,6 +23,9 @@ export const users = pgTable("user", {
   emailVerified: timestamp("emailVerified", { mode: "date" }),
   image: text("image"),
   passwordHash: text("passwordHash"),
+  nickname: text("nickname"),
+  // "Dev" | "QA" | "UX" | "BA" | "PO" | "PM" — fixed set of team roles.
+  role: text("role"),
 });
 
 export const accounts = pgTable(

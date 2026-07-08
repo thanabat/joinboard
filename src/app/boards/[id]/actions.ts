@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { activities, boardMembers, boards, cardLabels, cardLinks, cardMembers, cards, checklistItems, labels, lists, users } from "@/db/schema";
 import { and, eq, inArray, max } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { displayName } from "@/lib/displayName";
 
 async function requireBoardAccess(boardId: string) {
   const session = await auth();
@@ -358,7 +359,7 @@ export async function setCardMember(cardId: string, userId: string, assigned: bo
   const message =
     actorId === userId
       ? `${assigned ? "joined" : "left"} card "${card.title}"`
-      : `${assigned ? "assigned" : "unassigned"} ${targetUser?.email ?? "a member"} ${
+      : `${assigned ? "assigned" : "unassigned"} ${targetUser ? displayName(targetUser) : "a member"} ${
           assigned ? "to" : "from"
         } card "${card.title}"`;
   const activity = await logActivity(list.boardId, actorId, cardId, message);
@@ -535,7 +536,13 @@ export async function inviteMember(boardId: string, email: string) {
   const activity = await logActivity(boardId, actorId, null, `invited ${trimmedEmail} to the board`);
   revalidatePath(`/boards/${boardId}`);
   revalidatePath("/boards");
-  return { userId: invitee.id, email: invitee.email, status: "invited", activity };
+  return {
+    userId: invitee.id,
+    email: invitee.email,
+    displayName: displayName(invitee),
+    status: "invited",
+    activity,
+  };
 }
 
 export async function removeMember(boardId: string, userId: string) {
@@ -551,7 +558,7 @@ export async function removeMember(boardId: string, userId: string) {
     boardId,
     actorId,
     null,
-    `removed ${target?.email ?? "a member"} from the board`,
+    `removed ${target ? displayName(target) : "a member"} from the board`,
   );
   revalidatePath(`/boards/${boardId}`);
   return { activity };
@@ -570,7 +577,12 @@ export async function blockMember(boardId: string, userId: string) {
       set: { status: "blocked" },
     });
 
-  const activity = await logActivity(boardId, actorId, null, `blocked ${target?.email ?? "a member"}`);
+  const activity = await logActivity(
+    boardId,
+    actorId,
+    null,
+    `blocked ${target ? displayName(target) : "a member"}`,
+  );
   revalidatePath(`/boards/${boardId}`);
   return { activity };
 }
@@ -585,7 +597,12 @@ export async function unblockMember(boardId: string, userId: string) {
     .delete(boardMembers)
     .where(and(eq(boardMembers.boardId, boardId), eq(boardMembers.userId, userId)));
 
-  const activity = await logActivity(boardId, actorId, null, `unblocked ${target?.email ?? "a member"}`);
+  const activity = await logActivity(
+    boardId,
+    actorId,
+    null,
+    `unblocked ${target ? displayName(target) : "a member"}`,
+  );
   revalidatePath(`/boards/${boardId}`);
   return { activity };
 }

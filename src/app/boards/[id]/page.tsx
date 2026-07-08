@@ -4,6 +4,7 @@ import { activities, boardMembers, boards, cardLabels, cardLinks, cardMembers, c
 import { eq, inArray, and, or } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import { displayName } from "@/lib/displayName";
 import { Board } from "./Board";
 
 export default async function BoardPage({
@@ -112,18 +113,27 @@ export default async function BoardPage({
     return {
       userId: row.userId,
       email: user?.email ?? "(unknown)",
+      displayName: user ? displayName(user) : "(unknown)",
       status: row.status,
     };
   });
 
   const assignableMembers = [
-    { userId: board.ownerId, email: owner?.email ?? "(unknown)" },
+    {
+      userId: board.ownerId,
+      email: owner?.email ?? "(unknown)",
+      displayName: owner ? displayName(owner) : "(unknown)",
+    },
     ...memberRows
       .filter((row) => row.status === "active")
-      .map((row) => ({
-        userId: row.userId,
-        email: memberUsers.find((candidate) => candidate.id === row.userId)?.email ?? "(unknown)",
-      })),
+      .map((row) => {
+        const user = memberUsers.find((candidate) => candidate.id === row.userId);
+        return {
+          userId: row.userId,
+          email: user?.email ?? "(unknown)",
+          displayName: user ? displayName(user) : "(unknown)",
+        };
+      }),
   ];
 
   const activityRows = await db.query.activities.findMany({
@@ -135,25 +145,36 @@ export default async function BoardPage({
   const activityUsers = activityUserIds.length
     ? await db.query.users.findMany({ where: inArray(users.id, activityUserIds) })
     : [];
-  const initialActivities = activityRows.map((row) => ({
-    id: row.id,
-    message: row.message,
-    actorEmail: activityUsers.find((user) => user.id === row.userId)?.email ?? "(unknown)",
-    createdAt: row.createdAt,
-  }));
+  const initialActivities = activityRows.map((row) => {
+    const user = activityUsers.find((candidate) => candidate.id === row.userId);
+    return {
+      id: row.id,
+      message: row.message,
+      actorName: user ? displayName(user) : "(unknown)",
+      createdAt: row.createdAt,
+    };
+  });
 
   return (
     <div className="flex flex-1 flex-col">
       <header className="sticky top-0 z-10 border-b bg-card/80 backdrop-blur-sm">
-        <div className="flex items-center gap-3 px-6 py-3.5">
+        <div className="flex items-center justify-between gap-3 px-6 py-3.5">
+          <div className="flex items-center gap-3">
+            <Link
+              href="/boards"
+              className="flex items-center gap-1.5 rounded-md px-2 py-1 text-sm font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            >
+              ← Boards
+            </Link>
+            <span className="text-border">/</span>
+            <h1 className="text-lg font-semibold tracking-tight">{board.name}</h1>
+          </div>
           <Link
-            href="/boards"
-            className="flex items-center gap-1.5 rounded-md px-2 py-1 text-sm font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            href="/profile"
+            className="cursor-pointer rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground"
           >
-            ← Boards
+            Profile
           </Link>
-          <span className="text-border">/</span>
-          <h1 className="text-lg font-semibold tracking-tight">{board.name}</h1>
         </div>
       </header>
 
@@ -164,6 +185,7 @@ export default async function BoardPage({
           initialLabels={boardLabels}
           isAdmin={isAdmin}
           ownerEmail={owner?.email ?? "(unknown)"}
+          ownerDisplayName={owner ? displayName(owner) : "(unknown)"}
           initialMembers={members}
           initialInviteToken={board.inviteToken}
           assignableMembers={assignableMembers}

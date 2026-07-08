@@ -40,19 +40,27 @@ export default async function BoardsPage() {
             <img src="/joinboard-logo.svg" alt="" width={24} height={24} />
             <span className="font-semibold tracking-tight">Joinboard</span>
           </Link>
-          <form
-            action={async () => {
-              "use server";
-              await signOut({ redirectTo: "/" });
-            }}
-          >
-            <button
-              type="submit"
+          <div className="flex items-center gap-1">
+            <Link
+              href="/profile"
               className="cursor-pointer rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground"
             >
-              Log out
-            </button>
-          </form>
+              Profile
+            </Link>
+            <form
+              action={async () => {
+                "use server";
+                await signOut({ redirectTo: "/" });
+              }}
+            >
+              <button
+                type="submit"
+                className="cursor-pointer rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground"
+              >
+                Log out
+              </button>
+            </form>
+          </div>
         </div>
       </header>
 
