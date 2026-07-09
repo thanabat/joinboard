@@ -209,6 +209,19 @@ export const cardLinks = pgTable("cardLink", {
   createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
 });
 
+export const comments = pgTable("comment", {
+  id: id(),
+  cardId: text("cardId")
+    .notNull()
+    .references(() => cards.id, { onDelete: "cascade" }),
+  userId: text("userId")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  message: text("message").notNull(),
+  createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt", { mode: "date" }),
+});
+
 export const activities = pgTable("activity", {
   id: id(),
   boardId: text("boardId")

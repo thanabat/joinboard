@@ -37,6 +37,7 @@ import {
   History,
   Link2,
   ListChecks,
+  MessageSquare,
   Pencil,
   Plus,
   Rocket,
@@ -51,10 +52,12 @@ import {
   blockMember,
   createCard,
   createChecklistItem,
+  createComment,
   createLabel,
   createList,
   deleteCard,
   deleteChecklistItem,
+  deleteComment,
   deleteLabel,
   deleteList,
   generateInviteLink,
@@ -80,11 +83,20 @@ import {
   unblockMember,
   unlinkCards,
   updateCard,
+  updateComment,
   updateList,
 } from "./actions";
 
 type Label = { id: string; name: string; color: string };
 type ChecklistItem = { id: string; title: string; completed: boolean };
+type CardComment = {
+  id: string;
+  message: string;
+  authorId: string;
+  authorName: string;
+  createdAt: Date;
+  updatedAt: Date | null;
+};
 type CardType = "task" | "backlog_item";
 type CardPriority = "high" | "medium" | "low";
 type LinkRelation = "blocks" | "is_blocked_by" | "relates_to";
@@ -97,6 +109,7 @@ type CardItem = {
   labelIds: string[];
   memberIds: string[];
   checklistItems: ChecklistItem[];
+  comments: CardComment[];
   type: CardType;
   priority: CardPriority;
   storyPoints: number | null;
@@ -148,7 +161,7 @@ type CardCreateDetails = {
 };
 type Member = { userId: string; email: string; displayName: string; status: string };
 type AssignableMember = { userId: string; email: string; displayName: string };
-type Activity = { id: string; message: string; actorName: string; createdAt: Date };
+type Activity = { id: string; message: string; actorName: string; createdAt: Date; cardId: string | null };
 
 // Hoisted so this object's identity is stable across renders — passing a
 // fresh literal here every render defeats dnd-kit's sensor memoization and
@@ -375,15 +388,17 @@ export function Board({
     });
   }
 
-  function pushActivity(activity: { id: string; message: string; createdAt: Date } | undefined) {
+  function pushActivity(
+    activity: { id: string; message: string; createdAt: Date; cardId: string | null } | undefined,
+  ) {
     if (!activity) return;
     const actorName =
       assignableMembers.find((member) => member.userId === currentUserId)?.displayName ?? "Someone";
     setActivities((prev) =>
-      [{ id: activity.id, message: activity.message, actorName, createdAt: activity.createdAt }, ...prev].slice(
-        0,
-        MAX_ACTIVITIES,
-      ),
+      [
+        { id: activity.id, message: activity.message, actorName, createdAt: activity.createdAt, cardId: activity.cardId },
+        ...prev,
+      ].slice(0, MAX_ACTIVITIES),
     );
   }
 
@@ -527,6 +542,7 @@ export function Board({
                   labelIds: details.labelIds,
                   memberIds: details.memberIds,
                   checklistItems,
+                  comments: [],
                   type: card.type as CardType,
                   priority: card.priority as CardPriority,
                   storyPoints: card.storyPoints,
@@ -875,6 +891,68 @@ export function Board({
     pushActivity(activity);
   }
 
+  async function handleAddComment(cardId: string, message: string) {
+    const trimmed = message.trim();
+    if (!trimmed) return;
+    const { comment, activity } = await createComment(cardId, trimmed);
+    const authorName =
+      assignableMembers.find((member) => member.userId === comment.userId)?.displayName ?? "Someone";
+    setLists((prev) =>
+      prev.map((list) => ({
+        ...list,
+        cards: list.cards.map((card) =>
+          card.id === cardId
+            ? {
+                ...card,
+                comments: [
+                  {
+                    id: comment.id,
+                    message: comment.message,
+                    authorId: comment.userId,
+                    authorName,
+                    createdAt: comment.createdAt,
+                    updatedAt: comment.updatedAt,
+                  },
+                  ...card.comments,
+                ],
+              }
+            : card,
+        ),
+      })),
+    );
+    pushActivity(activity);
+  }
+
+  async function handleUpdateComment(commentId: string, message: string) {
+    const trimmed = message.trim();
+    if (!trimmed) return;
+    setLists((prev) =>
+      prev.map((list) => ({
+        ...list,
+        cards: list.cards.map((card) => ({
+          ...card,
+          comments: card.comments.map((comment) =>
+            comment.id === commentId ? { ...comment, message: trimmed, updatedAt: new Date() } : comment,
+          ),
+        })),
+      })),
+    );
+    await updateComment(commentId, trimmed);
+  }
+
+  async function handleDeleteComment(commentId: string) {
+    setLists((prev) =>
+      prev.map((list) => ({
+        ...list,
+        cards: list.cards.map((card) => ({
+          ...card,
+          comments: card.comments.filter((comment) => comment.id !== commentId),
+        })),
+      })),
+    );
+    await deleteComment(commentId);
+  }
+
   async function handleInvite(email: string) {
     try {
       const { activity, ...member } = await inviteMember(boardId, email);
@@ -1069,6 +1147,10 @@ export function Board({
               onLinkCard={handleLinkCard}
               onUnlinkCard={handleUnlinkCard}
               onNavigateToCard={setDetailCardId}
+              activities={activities}
+              onAddComment={handleAddComment}
+              onUpdateComment={handleUpdateComment}
+              onDeleteComment={handleDeleteComment}
             />
           )}
 
@@ -1333,7 +1415,7 @@ function SortableCard({
           <CardTypeIcon className="h-3 w-3" />
           {cardType.label}
         </span>
-        {card.storyPoints !== null && (
+        {card.type === "backlog_item" && card.storyPoints !== null && (
           <span
             title={`${card.storyPoints} story point${card.storyPoints === 1 ? "" : "s"}`}
             className="inline-flex shrink-0 items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground"
@@ -1480,6 +1562,10 @@ function CardDetailModal({
   onLinkCard,
   onUnlinkCard,
   onNavigateToCard,
+  activities,
+  onAddComment,
+  onUpdateComment,
+  onDeleteComment,
 }: {
   card: CardItem;
   boardLabels: Label[];
@@ -1506,15 +1592,25 @@ function CardDetailModal({
   onLinkCard: (cardId: string, targetCardId: string, relation: LinkRelation) => void;
   onUnlinkCard: (linkId: string) => void;
   onNavigateToCard: (cardId: string) => void;
+  activities: Activity[];
+  onAddComment: (cardId: string, message: string) => void;
+  onUpdateComment: (commentId: string, message: string) => void;
+  onDeleteComment: (commentId: string) => void;
 }) {
   const newLabelNameRef = useRef<HTMLInputElement>(null);
   const newLabelColorRef = useRef<HTMLInputElement>(null);
   const newChecklistItemRef = useRef<HTMLInputElement>(null);
+  const newCommentRef = useRef<HTMLTextAreaElement>(null);
+  const editCommentRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
   const renameChecklistItemRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showLabelPicker, setShowLabelPicker] = useState(false);
+  const [showMemberPicker, setShowMemberPicker] = useState(false);
+  const [showTypePicker, setShowTypePicker] = useState(false);
+  const [showPriorityPicker, setShowPriorityPicker] = useState(false);
   const [memberQuery, setMemberQuery] = useState("");
-  const [memberDropdownOpen, setMemberDropdownOpen] = useState(false);
   const [editingChecklistItemId, setEditingChecklistItemId] = useState<string | null>(null);
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [linkQuery, setLinkQuery] = useState("");
   const [linkDropdownOpen, setLinkDropdownOpen] = useState(false);
   const [linkRelation, setLinkRelation] = useState<LinkRelation>("relates_to");
@@ -1534,13 +1630,9 @@ function CardDetailModal({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
 
-  const unassignedMembers = assignableMembers.filter((member) => {
+  const memberSearchResults = assignableMembers.filter((member) => {
     const query = memberQuery.trim().toLowerCase();
-    return (
-      member.userId !== currentUserId &&
-      !card.memberIds.includes(member.userId) &&
-      (member.displayName.toLowerCase().includes(query) || member.email.toLowerCase().includes(query))
-    );
+    return member.displayName.toLowerCase().includes(query) || member.email.toLowerCase().includes(query);
   });
 
   const allCards = lists.flatMap((list) => list.cards);
@@ -1552,6 +1644,13 @@ function CardDetailModal({
       candidate.title.toLowerCase().includes(linkQuery.trim().toLowerCase()),
   );
 
+  const feedItems = [
+    ...card.comments.map((comment) => ({ kind: "comment" as const, createdAt: comment.createdAt, comment })),
+    ...activities
+      .filter((item) => item.cardId === card.id)
+      .map((activity) => ({ kind: "activity" as const, createdAt: activity.createdAt, activity })),
+  ].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
   return (
     <div
       className="animate-overlay-in fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm"
@@ -1561,7 +1660,7 @@ function CardDetailModal({
         role="dialog"
         aria-modal="true"
         onClick={(event) => event.stopPropagation()}
-        className="animate-modal-in max-h-[85vh] w-full max-w-md overflow-y-auto rounded-lg border bg-card p-5 shadow-lg"
+        className="animate-modal-in grid max-h-[85vh] w-full max-w-4xl grid-cols-1 gap-6 overflow-y-auto rounded-lg border bg-card p-5 shadow-lg lg:grid-cols-[1fr_320px]"
       >
         <form
           onSubmit={(event) => {
@@ -1570,7 +1669,8 @@ function CardDetailModal({
             const title = (form.elements.namedItem("title") as HTMLInputElement).value;
             const description = (form.elements.namedItem("description") as HTMLTextAreaElement).value;
             const dueDate = (form.elements.namedItem("dueDate") as HTMLInputElement).value;
-            const storyPoints = (form.elements.namedItem("storyPoints") as HTMLInputElement).value;
+            const storyPointsInput = form.elements.namedItem("storyPoints") as HTMLInputElement | null;
+            const storyPoints = storyPointsInput ? storyPointsInput.value : String(card.storyPoints ?? "");
             onSave(card.id, {
               title,
               description: description || null,
@@ -1578,7 +1678,7 @@ function CardDetailModal({
               storyPoints: storyPoints === "" ? null : Number(storyPoints),
             });
           }}
-          className="flex flex-col gap-4"
+          className="flex min-w-0 flex-col gap-4"
         >
           <input
             name="title"
@@ -1586,6 +1686,351 @@ function CardDetailModal({
             autoFocus
             className="rounded-md border bg-background px-2.5 py-2 text-base font-semibold tracking-tight outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
           />
+
+          <div className="flex flex-wrap gap-1.5">
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowLabelPicker((prev) => !prev)}
+                className={
+                  showLabelPicker
+                    ? "flex cursor-pointer items-center gap-1.5 rounded-md bg-foreground px-2.5 py-1.5 text-xs font-medium text-background transition"
+                    : "flex cursor-pointer items-center gap-1.5 rounded-md border bg-card px-2.5 py-1.5 text-xs font-medium transition hover:bg-muted"
+                }
+              >
+                <Tag className="h-3.5 w-3.5" />
+                Labels
+              </button>
+              {showLabelPicker && (
+                <>
+                  <div className="fixed inset-0 z-20" onClick={() => setShowLabelPicker(false)} />
+                  <div className="animate-modal-in absolute left-0 top-full z-30 mt-2 w-72 rounded-lg border bg-card p-4 shadow-lg">
+                    <div className="mb-3 flex items-center justify-between">
+                      <h4 className="text-sm font-semibold tracking-tight">Labels</h4>
+                      <button
+                        type="button"
+                        onClick={() => setShowLabelPicker(false)}
+                        aria-label="Close"
+                        className={iconButtonClass}
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {boardLabels.map((label) => {
+                        const assigned = card.labelIds.includes(label.id);
+                        return (
+                          <div
+                            key={label.id}
+                            style={
+                              assigned
+                                ? { backgroundColor: label.color, borderColor: label.color }
+                                : { borderColor: label.color, color: label.color }
+                            }
+                            className={
+                              assigned
+                                ? "group/label flex items-center gap-1 rounded-full border-2 py-1 pl-2.5 pr-1.5 text-xs font-medium text-white transition"
+                                : "group/label flex items-center gap-1 rounded-full border-2 bg-transparent py-1 pl-2.5 pr-1.5 text-xs font-medium transition"
+                            }
+                          >
+                            <button
+                              type="button"
+                              onClick={() => onToggleLabel(card.id, label.id, !assigned)}
+                              className="cursor-pointer"
+                            >
+                              {assigned ? `✓ ${label.name}` : label.name}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => onDeleteLabel(label.id)}
+                              aria-label={`Delete label ${label.name}`}
+                              className="cursor-pointer rounded-full p-0.5 opacity-0 transition hover:text-destructive group-hover/label:opacity-100"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="mt-3 flex gap-2">
+                      <input
+                        type="color"
+                        defaultValue="#4f46e5"
+                        ref={newLabelColorRef}
+                        className="h-9 w-11 shrink-0 cursor-pointer rounded-md border bg-background p-1"
+                      />
+                      <input
+                        type="text"
+                        ref={newLabelNameRef}
+                        placeholder="New label"
+                        className="min-w-0 flex-1 rounded-md border bg-background px-2.5 py-1.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
+                      />
+                      <button
+                        type="button"
+                        aria-label="Add label"
+                        onClick={() => {
+                          const name = newLabelNameRef.current?.value.trim();
+                          if (!name) return;
+                          onCreateLabel(name, newLabelColorRef.current!.value);
+                          newLabelNameRef.current!.value = "";
+                        }}
+                        className="flex shrink-0 cursor-pointer items-center gap-1 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground transition hover:bg-primary-hover"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        Add
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => onToggleMember(card.id, currentUserId, !card.memberIds.includes(currentUserId))}
+              className="flex cursor-pointer items-center gap-1.5 rounded-md border bg-card px-2.5 py-1.5 text-xs font-medium transition hover:bg-muted"
+            >
+              {card.memberIds.includes(currentUserId) ? "Leave" : "Join"}
+            </button>
+
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowMemberPicker((prev) => !prev)}
+                className={
+                  showMemberPicker
+                    ? "flex cursor-pointer items-center gap-1.5 rounded-md bg-foreground px-2.5 py-1.5 text-xs font-medium text-background transition"
+                    : "flex cursor-pointer items-center gap-1.5 rounded-md border bg-card px-2.5 py-1.5 text-xs font-medium transition hover:bg-muted"
+                }
+              >
+                <Users className="h-3.5 w-3.5" />
+                Members
+              </button>
+              {showMemberPicker && (
+                <>
+                  <div className="fixed inset-0 z-20" onClick={() => setShowMemberPicker(false)} />
+                  <div className="animate-modal-in absolute left-0 top-full z-30 mt-2 w-72 rounded-lg border bg-card p-4 shadow-lg">
+                    <div className="mb-3 flex items-center justify-between">
+                      <h4 className="text-sm font-semibold tracking-tight">Members</h4>
+                      <button
+                        type="button"
+                        onClick={() => setShowMemberPicker(false)}
+                        aria-label="Close"
+                        className={iconButtonClass}
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      value={memberQuery}
+                      onChange={(event) => setMemberQuery(event.target.value)}
+                      placeholder="Search members"
+                      className="w-full rounded-md border bg-background px-2.5 py-1.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
+                    />
+                    <p className="mb-1.5 mt-3 text-xs font-semibold text-muted-foreground">Board members</p>
+                    <ul className="flex max-h-52 flex-col gap-0.5 overflow-y-auto">
+                      {memberSearchResults.length > 0 ? (
+                        memberSearchResults.map((member) => {
+                          const assigned = card.memberIds.includes(member.userId);
+                          return (
+                            <li key={member.userId}>
+                              <button
+                                type="button"
+                                onClick={() => onToggleMember(card.id, member.userId, !assigned)}
+                                className={
+                                  assigned
+                                    ? "flex w-full cursor-pointer items-center gap-2 rounded-md bg-primary-tint px-2 py-1.5 text-left text-sm transition"
+                                    : "flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition hover:bg-muted"
+                                }
+                              >
+                                <span
+                                  style={{ backgroundColor: avatarColor(member.displayName) }}
+                                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+                                >
+                                  {member.displayName.charAt(0).toUpperCase()}
+                                </span>
+                                <span className="flex-1 truncate">{member.displayName}</span>
+                                {assigned && <Check className="h-4 w-4 shrink-0 text-primary" />}
+                              </button>
+                            </li>
+                          );
+                        })
+                      ) : (
+                        <p className="px-2 py-1.5 text-sm text-muted-foreground">No members found</p>
+                      )}
+                    </ul>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowTypePicker((prev) => !prev)}
+                style={{ backgroundColor: CARD_TYPES[card.type].color, borderColor: CARD_TYPES[card.type].color }}
+                className="flex cursor-pointer items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium text-white transition"
+              >
+                {(() => {
+                  const TypeIcon = CARD_TYPES[card.type].icon;
+                  return <TypeIcon className="h-3.5 w-3.5" />;
+                })()}
+                {CARD_TYPES[card.type].label}
+              </button>
+              {showTypePicker && (
+                <>
+                  <div className="fixed inset-0 z-20" onClick={() => setShowTypePicker(false)} />
+                  <div className="animate-modal-in absolute left-0 top-full z-30 mt-2 w-56 rounded-lg border bg-card p-2 shadow-lg">
+                    {(Object.entries(CARD_TYPES) as [CardType, (typeof CARD_TYPES)[CardType]][]).map(
+                      ([value, config]) => {
+                        const selected = card.type === value;
+                        const TypeIcon = config.icon;
+                        return (
+                          <button
+                            key={value}
+                            type="button"
+                            onClick={() => {
+                              onSetType(card.id, value);
+                              setShowTypePicker(false);
+                            }}
+                            className={
+                              selected
+                                ? "flex w-full cursor-pointer items-center gap-2 rounded-md bg-primary-tint px-2 py-1.5 text-left text-sm transition"
+                                : "flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition hover:bg-muted"
+                            }
+                          >
+                            <TypeIcon className="h-3.5 w-3.5 shrink-0" style={{ color: config.color }} />
+                            <span className="flex-1 truncate">{config.label}</span>
+                            {selected && <Check className="h-4 w-4 shrink-0 text-primary" />}
+                          </button>
+                        );
+                      },
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowPriorityPicker((prev) => !prev)}
+                style={{
+                  backgroundColor: CARD_PRIORITIES[card.priority].color,
+                  borderColor: CARD_PRIORITIES[card.priority].color,
+                }}
+                className="flex cursor-pointer items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium text-white transition"
+              >
+                {(() => {
+                  const PriorityIcon = CARD_PRIORITIES[card.priority].icon;
+                  return <PriorityIcon className="h-3.5 w-3.5" />;
+                })()}
+                {CARD_PRIORITIES[card.priority].label}
+              </button>
+              {showPriorityPicker && (
+                <>
+                  <div className="fixed inset-0 z-20" onClick={() => setShowPriorityPicker(false)} />
+                  <div className="animate-modal-in absolute left-0 top-full z-30 mt-2 w-56 rounded-lg border bg-card p-2 shadow-lg">
+                    {(
+                      Object.entries(CARD_PRIORITIES) as [CardPriority, (typeof CARD_PRIORITIES)[CardPriority]][]
+                    ).map(([value, config]) => {
+                      const selected = card.priority === value;
+                      const PriorityIcon = config.icon;
+                      return (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => {
+                            onSetPriority(card.id, value);
+                            setShowPriorityPicker(false);
+                          }}
+                          className={
+                            selected
+                              ? "flex w-full cursor-pointer items-center gap-2 rounded-md bg-primary-tint px-2 py-1.5 text-left text-sm transition"
+                              : "flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition hover:bg-muted"
+                          }
+                        >
+                          <PriorityIcon className="h-3.5 w-3.5 shrink-0" style={{ color: config.color }} />
+                          <span className="flex-1 truncate">{config.label}</span>
+                          {selected && <Check className="h-4 w-4 shrink-0 text-primary" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          {card.labelIds.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+                <Tag className="h-3.5 w-3.5" />
+                Labels
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {boardLabels
+                  .filter((label) => card.labelIds.includes(label.id))
+                  .map((label) => (
+                    <div
+                      key={label.id}
+                      style={{ backgroundColor: label.color, borderColor: label.color }}
+                      className="group/label flex items-center gap-1 rounded-full border-2 py-1 pl-2.5 pr-1.5 text-xs font-medium text-white transition"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => onToggleLabel(card.id, label.id, false)}
+                        className="cursor-pointer"
+                      >
+                        {label.name}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onToggleLabel(card.id, label.id, false)}
+                        aria-label={`Remove label ${label.name}`}
+                        className="cursor-pointer rounded-full p-0.5 opacity-0 transition hover:text-destructive group-hover/label:opacity-100"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+
+          {card.memberIds.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+                <Users className="h-3.5 w-3.5" />
+                Members
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {assignableMembers
+                  .filter((member) => card.memberIds.includes(member.userId))
+                  .map((member) => {
+                    const isSelf = member.userId === currentUserId;
+                    return (
+                      <button
+                        key={member.userId}
+                        type="button"
+                        title={member.displayName}
+                        onClick={() => onToggleMember(card.id, member.userId, false)}
+                        className="flex cursor-pointer items-center gap-1.5 rounded-full border-2 border-primary bg-primary-tint py-0.5 pl-0.5 pr-2.5 text-xs font-medium text-primary transition"
+                      >
+                        <span
+                          style={{ backgroundColor: avatarColor(member.displayName) }}
+                          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+                        >
+                          {member.displayName.charAt(0).toUpperCase()}
+                        </span>
+                        {isSelf ? "Leave" : `Remove ${member.displayName}`}
+                      </button>
+                    );
+                  })}
+              </div>
+            </div>
+          )}
 
           <label className="flex flex-col gap-1.5 text-sm font-medium text-muted-foreground">
             <span className="flex items-center gap-1.5">
@@ -1600,70 +2045,6 @@ function CardDetailModal({
               className="rounded-md border bg-background px-2.5 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
             />
           </label>
-
-          <div className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-muted-foreground">Type</span>
-            <div className="flex flex-wrap gap-1.5">
-              {(Object.entries(CARD_TYPES) as [CardType, (typeof CARD_TYPES)[CardType]][]).map(
-                ([value, config]) => {
-                  const selected = card.type === value;
-                  const TypeIcon = config.icon;
-                  return (
-                    <button
-                      key={value}
-                      type="button"
-                      onClick={() => onSetType(card.id, value)}
-                      style={
-                        selected
-                          ? { backgroundColor: config.color, borderColor: config.color }
-                          : { borderColor: config.color, color: config.color }
-                      }
-                      className={
-                        selected
-                          ? "flex cursor-pointer items-center gap-1.5 rounded-full border-2 px-2.5 py-1 text-left text-xs font-medium text-white transition"
-                          : "flex cursor-pointer items-center gap-1.5 rounded-full border-2 bg-transparent px-2.5 py-1 text-left text-xs font-medium transition"
-                      }
-                    >
-                      <TypeIcon className="h-3.5 w-3.5" />
-                      {config.label}
-                    </button>
-                  );
-                },
-              )}
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-muted-foreground">Priority</span>
-            <div className="flex flex-wrap gap-1.5">
-              {(Object.entries(CARD_PRIORITIES) as [CardPriority, (typeof CARD_PRIORITIES)[CardPriority]][]).map(
-                ([value, config]) => {
-                  const selected = card.priority === value;
-                  const PriorityIcon = config.icon;
-                  return (
-                    <button
-                      key={value}
-                      type="button"
-                      onClick={() => onSetPriority(card.id, value)}
-                      style={
-                        selected
-                          ? { backgroundColor: config.color, borderColor: config.color }
-                          : { borderColor: config.color, color: config.color }
-                      }
-                      className={
-                        selected
-                          ? "flex cursor-pointer items-center gap-1.5 rounded-full border-2 px-2.5 py-1 text-left text-xs font-medium text-white transition"
-                          : "flex cursor-pointer items-center gap-1.5 rounded-full border-2 bg-transparent px-2.5 py-1 text-left text-xs font-medium transition"
-                      }
-                    >
-                      <PriorityIcon className="h-3.5 w-3.5" />
-                      {config.label}
-                    </button>
-                  );
-                },
-              )}
-            </div>
-          </div>
 
           {currentSprint && (
             <div className="flex flex-col gap-1.5">
@@ -1720,21 +2101,23 @@ function CardDetailModal({
               </select>
             </label>
 
-            <label className="flex flex-col gap-1.5 text-sm font-medium text-muted-foreground">
-              <span className="flex items-center gap-1.5">
-                <Hash className="h-3.5 w-3.5" />
-                Story points
-              </span>
-              <input
-                name="storyPoints"
-                type="number"
-                min={0}
-                step={1}
-                defaultValue={card.storyPoints ?? ""}
-                placeholder="Unestimated"
-                className="rounded-md border bg-background px-2.5 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
-              />
-            </label>
+            {card.type === "backlog_item" && (
+              <label className="flex flex-col gap-1.5 text-sm font-medium text-muted-foreground">
+                <span className="flex items-center gap-1.5">
+                  <Hash className="h-3.5 w-3.5" />
+                  Story points
+                </span>
+                <input
+                  name="storyPoints"
+                  type="number"
+                  min={0}
+                  step={1}
+                  defaultValue={card.storyPoints ?? ""}
+                  placeholder="Unestimated"
+                  className="rounded-md border bg-background px-2.5 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
+                />
+              </label>
+            )}
           </div>
 
           <button
@@ -1749,161 +2132,6 @@ function CardDetailModal({
           {showAdvanced && (
             <>
               <div className="flex flex-col gap-2">
-                <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
-                  <Tag className="h-3.5 w-3.5" />
-                  Labels
-                </span>
-                <div className="flex flex-wrap gap-1.5">
-                  {boardLabels.map((label) => {
-                    const assigned = card.labelIds.includes(label.id);
-                    return (
-                      <div
-                        key={label.id}
-                        style={
-                          assigned
-                            ? { backgroundColor: label.color, borderColor: label.color }
-                            : { borderColor: label.color, color: label.color }
-                        }
-                        className={
-                          assigned
-                            ? "group/label flex items-center gap-1 rounded-full border-2 py-1 pl-2.5 pr-1.5 text-xs font-medium text-white transition"
-                            : "group/label flex items-center gap-1 rounded-full border-2 bg-transparent py-1 pl-2.5 pr-1.5 text-xs font-medium transition"
-                        }
-                      >
-                        <button
-                          type="button"
-                          onClick={() => onToggleLabel(card.id, label.id, !assigned)}
-                          className="cursor-pointer"
-                        >
-                          {assigned ? `✓ ${label.name}` : label.name}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => onDeleteLabel(label.id)}
-                          aria-label={`Delete label ${label.name}`}
-                          className="cursor-pointer rounded-full p-0.5 opacity-0 transition hover:text-destructive group-hover/label:opacity-100"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-                <div className="flex gap-2">
-                  <input
-                    type="color"
-                    defaultValue="#4f46e5"
-                    ref={newLabelColorRef}
-                    className="h-9 w-11 cursor-pointer rounded-md border bg-background p-1"
-                  />
-                  <input
-                    type="text"
-                    ref={newLabelNameRef}
-                    placeholder="New label"
-                    className="flex-1 rounded-md border bg-background px-2.5 py-1.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
-                  />
-                  <button
-                    type="button"
-                    aria-label="Add label"
-                    onClick={() => {
-                      const name = newLabelNameRef.current?.value.trim();
-                      if (!name) return;
-                      onCreateLabel(name, newLabelColorRef.current!.value);
-                      newLabelNameRef.current!.value = "";
-                    }}
-                    className="flex cursor-pointer items-center gap-1 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground transition hover:bg-primary-hover"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    Add
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
-                  <Users className="h-3.5 w-3.5" />
-                  Members
-                </span>
-            <div className="flex flex-wrap gap-1.5">
-              {assignableMembers
-                .filter((member) => card.memberIds.includes(member.userId))
-                .map((member) => {
-                  const isSelf = member.userId === currentUserId;
-                  return (
-                    <button
-                      key={member.userId}
-                      type="button"
-                      title={member.displayName}
-                      onClick={() => onToggleMember(card.id, member.userId, false)}
-                      className="flex cursor-pointer items-center gap-1.5 rounded-full border-2 border-primary bg-primary-tint py-0.5 pl-0.5 pr-2.5 text-xs font-medium text-primary transition"
-                    >
-                      <span
-                        style={{ backgroundColor: avatarColor(member.displayName) }}
-                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white"
-                      >
-                        {member.displayName.charAt(0).toUpperCase()}
-                      </span>
-                      {isSelf ? "Leave" : `Remove ${member.displayName}`}
-                    </button>
-                  );
-                })}
-              {!card.memberIds.includes(currentUserId) && (
-                <button
-                  type="button"
-                  onClick={() => onToggleMember(card.id, currentUserId, true)}
-                  className="cursor-pointer rounded-full border-2 border-transparent bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground transition hover:bg-border/60"
-                >
-                  Join
-                </button>
-              )}
-            </div>
-
-            <div className="relative">
-              <input
-                type="text"
-                value={memberQuery}
-                onFocus={() => setMemberDropdownOpen(true)}
-                onChange={(event) => {
-                  setMemberQuery(event.target.value);
-                  setMemberDropdownOpen(true);
-                }}
-                onBlur={() => setMemberDropdownOpen(false)}
-                placeholder="Assign to…"
-                className="w-full rounded-md border bg-background px-2.5 py-1.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
-              />
-              {memberDropdownOpen && (
-                <div className="absolute z-10 mt-1 max-h-40 w-full overflow-y-auto rounded-md border bg-card shadow-md">
-                  {unassignedMembers.length > 0 ? (
-                    unassignedMembers.map((member) => (
-                      <button
-                        key={member.userId}
-                        type="button"
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => {
-                          onToggleMember(card.id, member.userId, true);
-                          setMemberQuery("");
-                          setMemberDropdownOpen(false);
-                        }}
-                        className="flex w-full cursor-pointer items-center gap-2 px-2.5 py-1.5 text-left text-sm transition hover:bg-muted"
-                      >
-                        <span
-                          style={{ backgroundColor: avatarColor(member.displayName) }}
-                          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white"
-                        >
-                          {member.displayName.charAt(0).toUpperCase()}
-                        </span>
-                        {member.displayName}
-                      </button>
-                    ))
-                  ) : (
-                    <p className="px-2.5 py-1.5 text-sm text-muted-foreground">No members found</p>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-2">
             <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
               <ListChecks className="h-3.5 w-3.5" />
               Checklist
@@ -2154,6 +2382,137 @@ function CardDetailModal({
             </div>
           </div>
         </form>
+
+        <div className="flex min-w-0 flex-col gap-3 lg:border-l lg:pl-6">
+          <h3 className="flex items-center gap-1.5 text-sm font-semibold tracking-tight">
+            <MessageSquare className="h-4 w-4" />
+            Comments and activity
+          </h3>
+
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              const message = newCommentRef.current?.value ?? "";
+              if (!message.trim()) return;
+              onAddComment(card.id, message);
+              if (newCommentRef.current) newCommentRef.current.value = "";
+            }}
+            className="flex flex-col gap-2"
+          >
+            <textarea
+              ref={newCommentRef}
+              placeholder="Write a comment…"
+              rows={2}
+              className="rounded-md border bg-background px-2.5 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
+            />
+            <button
+              type="submit"
+              className="cursor-pointer self-end rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground shadow-sm transition hover:bg-primary-hover active:scale-[0.98]"
+            >
+              Comment
+            </button>
+          </form>
+
+          {feedItems.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No comments or activity yet.</p>
+          ) : (
+            <ul className="flex flex-col gap-3">
+              {feedItems.map((item) =>
+                item.kind === "comment" ? (
+                  <li key={item.comment.id} className="flex gap-2">
+                    <span
+                      style={{ backgroundColor: avatarColor(item.comment.authorName) }}
+                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+                    >
+                      {item.comment.authorName.charAt(0).toUpperCase()}
+                    </span>
+                    <div className="flex flex-1 flex-col gap-1">
+                      <span className="text-sm leading-snug">
+                        <span className="font-medium">{item.comment.authorName}</span>{" "}
+                        <span className="text-xs text-muted-foreground">
+                          {timeAgo(item.comment.createdAt)}
+                          {item.comment.updatedAt && " (edited)"}
+                        </span>
+                      </span>
+                      {editingCommentId === item.comment.id ? (
+                        <div className="flex flex-col gap-1.5">
+                          <textarea
+                            ref={(el) => {
+                              editCommentRefs.current[item.comment.id] = el;
+                            }}
+                            defaultValue={item.comment.message}
+                            autoFocus
+                            rows={2}
+                            className="rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-ring/30"
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const value = editCommentRefs.current[item.comment.id]?.value ?? "";
+                                onUpdateComment(item.comment.id, value);
+                                setEditingCommentId(null);
+                              }}
+                              className="cursor-pointer rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground transition hover:bg-primary-hover"
+                            >
+                              Save
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingCommentId(null)}
+                              className="cursor-pointer rounded-md border bg-card px-2.5 py-1 text-xs font-medium transition hover:bg-muted"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <p className="rounded-md bg-muted px-2.5 py-1.5 text-sm whitespace-pre-wrap">
+                            {item.comment.message}
+                          </p>
+                          {item.comment.authorId === currentUserId && (
+                            <div className="flex gap-2 text-xs text-muted-foreground">
+                              <button
+                                type="button"
+                                onClick={() => setEditingCommentId(item.comment.id)}
+                                className="cursor-pointer hover:underline"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => onDeleteComment(item.comment.id)}
+                                className="cursor-pointer hover:text-destructive hover:underline"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </li>
+                ) : (
+                  <li key={item.activity.id} className="flex gap-2">
+                    <span
+                      style={{ backgroundColor: avatarColor(item.activity.actorName) }}
+                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+                    >
+                      {item.activity.actorName.charAt(0).toUpperCase()}
+                    </span>
+                    <div className="flex flex-col gap-0.5 text-sm">
+                      <span className="leading-snug">
+                        <span className="font-medium">{item.activity.actorName}</span> {item.activity.message}
+                      </span>
+                      <span className="text-xs text-muted-foreground">{timeAgo(item.activity.createdAt)}</span>
+                    </div>
+                  </li>
+                ),
+              )}
+            </ul>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -2235,7 +2594,8 @@ function CreateCardModal({
             const title = (form.elements.namedItem("title") as HTMLInputElement).value;
             const description = (form.elements.namedItem("description") as HTMLTextAreaElement).value;
             const dueDate = (form.elements.namedItem("dueDate") as HTMLInputElement).value;
-            const storyPoints = (form.elements.namedItem("storyPoints") as HTMLInputElement).value;
+            const storyPointsInput = form.elements.namedItem("storyPoints") as HTMLInputElement | null;
+            const storyPoints = storyPointsInput ? storyPointsInput.value : "";
             if (!title.trim()) return;
             onCreate({
               title,
@@ -2351,20 +2711,22 @@ function CreateCardModal({
               />
             </label>
 
-            <label className="flex flex-col gap-1.5 text-sm font-medium text-muted-foreground">
-              <span className="flex items-center gap-1.5">
-                <Hash className="h-3.5 w-3.5" />
-                Story points
-              </span>
-              <input
-                name="storyPoints"
-                type="number"
-                min={0}
-                step={1}
-                placeholder="Unestimated"
-                className="rounded-md border bg-background px-2.5 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
-              />
-            </label>
+            {type === "backlog_item" && (
+              <label className="flex flex-col gap-1.5 text-sm font-medium text-muted-foreground">
+                <span className="flex items-center gap-1.5">
+                  <Hash className="h-3.5 w-3.5" />
+                  Story points
+                </span>
+                <input
+                  name="storyPoints"
+                  type="number"
+                  min={0}
+                  step={1}
+                  placeholder="Unestimated"
+                  className="rounded-md border bg-background px-2.5 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
+                />
+              </label>
+            )}
           </div>
 
           <button

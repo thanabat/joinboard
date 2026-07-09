@@ -85,6 +85,13 @@
       "when": 1783588251784,
       "tag": "0011_mighty_killer_shrike",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1783588898622,
+      "tag": "0012_third_banshee",
+      "breakpoints": true
     }
   ]
 }

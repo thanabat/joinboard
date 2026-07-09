@@ -2,7 +2,7 @@
 
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { activities, boardMembers, boards, cardLabels, cardLinks, cardMembers, cards, checklistItems, labels, lists, sprints, users } from "@/db/schema";
+import { activities, boardMembers, boards, cardLabels, cardLinks, cardMembers, cards, checklistItems, comments, labels, lists, sprints, users } from "@/db/schema";
 import { and, eq, inArray, max, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { displayName } from "@/lib/displayName";
@@ -844,4 +844,45 @@ export async function setListDone(listId: string, isDone: boolean) {
   );
   revalidatePath(`/boards/${board.id}`);
   return { activity };
+}
+
+// --- Comments ---
+
+export async function createComment(cardId: string, message: string) {
+  const { card, list, userId } = await requireCardAccess(cardId);
+
+  const trimmed = message.trim();
+  if (!trimmed) throw new Error("Comment cannot be empty");
+
+  const [comment] = await db.insert(comments).values({ cardId, userId, message: trimmed }).returning();
+
+  const activity = await logActivity(list.boardId, userId, cardId, `commented on card "${card.title}"`);
+  revalidatePath(`/boards/${list.boardId}`);
+  return { comment, activity };
+}
+
+export async function updateComment(commentId: string, message: string) {
+  const comment = await db.query.comments.findFirst({ where: eq(comments.id, commentId) });
+  if (!comment) throw new Error("Comment not found");
+  const { list, userId } = await requireCardAccess(comment.cardId);
+  if (comment.userId !== userId) throw new Error("You can only edit your own comments");
+
+  const trimmed = message.trim();
+  if (!trimmed) throw new Error("Comment cannot be empty");
+
+  await db
+    .update(comments)
+    .set({ message: trimmed, updatedAt: new Date() })
+    .where(eq(comments.id, commentId));
+  revalidatePath(`/boards/${list.boardId}`);
+}
+
+export async function deleteComment(commentId: string) {
+  const comment = await db.query.comments.findFirst({ where: eq(comments.id, commentId) });
+  if (!comment) throw new Error("Comment not found");
+  const { list, userId } = await requireCardAccess(comment.cardId);
+  if (comment.userId !== userId) throw new Error("You can only delete your own comments");
+
+  await db.delete(comments).where(eq(comments.id, commentId));
+  revalidatePath(`/boards/${list.boardId}`);
 }
