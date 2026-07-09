@@ -295,6 +295,7 @@ export function Board({
   const [members, setMembers] = useState(initialMembers);
   const [inviteToken, setInviteToken] = useState(initialInviteToken);
   const [showLabelText, setShowLabelText] = useState(false);
+  const showLabelTextKey = `joinboard:showLabelText:${boardId}`;
   const [editingListId, setEditingListId] = useState<string | null>(null);
   const [detailCardId, setDetailCardId] = useState<string | null>(null);
   const [creatingCardListId, setCreatingCardListId] = useState<string | null>(null);
@@ -303,6 +304,19 @@ export function Board({
   const [activityCollapsed, setActivityCollapsed] = useState(false);
   const [, startTransition] = useTransition();
   const sensors = useSensors(useSensor(PointerSensor, POINTER_SENSOR_OPTIONS));
+
+  useEffect(() => {
+    const stored = localStorage.getItem(showLabelTextKey);
+    if (stored !== null) setShowLabelText(stored === "true");
+  }, [showLabelTextKey]);
+
+  function handleToggleLabelText() {
+    setShowLabelText((prev) => {
+      const next = !prev;
+      localStorage.setItem(showLabelTextKey, String(next));
+      return next;
+    });
+  }
 
   function pushActivity(activity: { id: string; message: string; createdAt: Date } | undefined) {
     if (!activity) return;
@@ -806,7 +820,7 @@ export function Board({
                   boardLabels={boardLabels}
                   assignableMembers={assignableMembers}
                   showLabelText={showLabelText}
-                  onToggleLabelText={() => setShowLabelText((prev) => !prev)}
+                  onToggleLabelText={handleToggleLabelText}
                   isEditing={editingListId === list.id}
                   onStartEdit={() => setEditingListId(list.id)}
                   onCancelEdit={() => setEditingListId(null)}
