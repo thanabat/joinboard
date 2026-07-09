@@ -64,6 +64,13 @@
       "when": 1783525821365,
       "tag": "0008_calm_gideon",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1783579374501,
+      "tag": "0009_jazzy_shooting_star",
+      "breakpoints": true
     }
   ]
 }

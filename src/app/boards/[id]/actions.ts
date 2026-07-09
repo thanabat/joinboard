@@ -2,7 +2,7 @@
 
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { activities, boardMembers, boards, cardLabels, cardLinks, cardMembers, cards, checklistItems, labels, lists, users } from "@/db/schema";
+import { activities, boardMembers, boards, cardLabels, cardLinks, cardMembers, cards, checklistItems, labels, lists, sprints, users } from "@/db/schema";
 import { and, eq, inArray, max } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { displayName } from "@/lib/displayName";
@@ -674,5 +674,92 @@ export async function revokeInviteLink(boardId: string) {
 
   const activity = await logActivity(boardId, userId, null, "revoked the invite link");
   revalidatePath(`/boards/${boardId}`);
+  return { activity };
+}
+
+// --- Sprints (a board has at most one non-completed sprint at a time) ---
+
+export async function createSprint(boardId: string, name: string, startDate: string, endDate: string) {
+  const { userId } = await requireBoardAccess(boardId);
+
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error("Name is required");
+
+  const existing = await db.query.sprints.findFirst({
+    where: and(eq(sprints.boardId, boardId), inArray(sprints.status, ["planned", "active"])),
+  });
+  if (existing) throw new Error("Complete the current sprint before creating a new one");
+
+  const [sprint] = await db
+    .insert(sprints)
+    .values({ boardId, name: trimmed, startDate: new Date(startDate), endDate: new Date(endDate) })
+    .returning();
+
+  const activity = await logActivity(boardId, userId, null, `created sprint "${trimmed}"`);
+  revalidatePath(`/boards/${boardId}/dashboard`);
+  return { sprint, activity };
+}
+
+export async function startSprint(sprintId: string) {
+  const sprint = await db.query.sprints.findFirst({ where: eq(sprints.id, sprintId) });
+  if (!sprint) throw new Error("Sprint not found");
+  const { userId } = await requireBoardAccess(sprint.boardId);
+  if (sprint.status !== "planned") throw new Error("Sprint already started");
+
+  await db.update(sprints).set({ status: "active" }).where(eq(sprints.id, sprintId));
+
+  const activity = await logActivity(sprint.boardId, userId, null, `started sprint "${sprint.name}"`);
+  revalidatePath(`/boards/${sprint.boardId}/dashboard`);
+  return { activity };
+}
+
+export async function completeSprint(sprintId: string) {
+  const sprint = await db.query.sprints.findFirst({ where: eq(sprints.id, sprintId) });
+  if (!sprint) throw new Error("Sprint not found");
+  const { userId } = await requireBoardAccess(sprint.boardId);
+
+  await db.update(sprints).set({ status: "completed" }).where(eq(sprints.id, sprintId));
+
+  const activity = await logActivity(sprint.boardId, userId, null, `completed sprint "${sprint.name}"`);
+  revalidatePath(`/boards/${sprint.boardId}/dashboard`);
+  return { activity };
+}
+
+export async function setCardSprint(cardId: string, sprintId: string | null) {
+  const { card, list, userId } = await requireCardAccess(cardId);
+
+  if (sprintId) {
+    const sprint = await db.query.sprints.findFirst({ where: eq(sprints.id, sprintId) });
+    if (!sprint || sprint.boardId !== list.boardId) throw new Error("Sprint not found");
+  }
+
+  await db.update(cards).set({ sprintId }).where(eq(cards.id, cardId));
+
+  const message = sprintId
+    ? `added card "${card.title}" to the sprint`
+    : `removed card "${card.title}" from the sprint`;
+  const activity = await logActivity(list.boardId, userId, cardId, message);
+  revalidatePath(`/boards/${list.boardId}`);
+  return { activity };
+}
+
+export async function setListDone(listId: string, isDone: boolean) {
+  const { list, board, userId } = await requireListAccess(listId);
+
+  if (isDone) {
+    await db
+      .update(lists)
+      .set({ isDoneList: false })
+      .where(and(eq(lists.boardId, board.id), eq(lists.isDoneList, true)));
+  }
+  await db.update(lists).set({ isDoneList: isDone }).where(eq(lists.id, listId));
+
+  const activity = await logActivity(
+    board.id,
+    userId,
+    null,
+    isDone ? `marked list "${list.title}" as the Done list` : `unmarked list "${list.title}" as the Done list`,
+  );
+  revalidatePath(`/boards/${board.id}`);
   return { activity };
 }

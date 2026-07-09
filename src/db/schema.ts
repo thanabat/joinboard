@@ -112,6 +112,21 @@ export const lists = pgTable("list", {
     .references(() => boards.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
   position: doublePrecision("position").notNull(),
+  // Marks the single list whose cards count as complete for sprint tracking.
+  isDoneList: boolean("isDoneList").notNull().default(false),
+  createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
+});
+
+export const sprints = pgTable("sprint", {
+  id: id(),
+  boardId: text("boardId")
+    .notNull()
+    .references(() => boards.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  startDate: timestamp("startDate", { mode: "date" }).notNull(),
+  endDate: timestamp("endDate", { mode: "date" }).notNull(),
+  // "planned" | "active" | "completed" — a board has at most one non-completed sprint at a time.
+  status: text("status").notNull().default("planned"),
   createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
 });
 
@@ -126,6 +141,7 @@ export const cards = pgTable("card", {
   dueDate: timestamp("dueDate", { mode: "date" }),
   // "task" | "backlog_item" — fixed set of card types, similar to Azure DevOps work item types.
   type: text("type").notNull().default("task"),
+  sprintId: text("sprintId").references(() => sprints.id, { onDelete: "set null" }),
   createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
 });
 

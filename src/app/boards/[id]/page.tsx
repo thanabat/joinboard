@@ -1,11 +1,12 @@
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { activities, boardMembers, boards, cardLabels, cardLinks, cardMembers, cards, checklistItems, labels, lists, users } from "@/db/schema";
+import { activities, boardMembers, boards, cardLabels, cardLinks, cardMembers, cards, checklistItems, labels, lists, sprints, users } from "@/db/schema";
 import { eq, inArray, and, or } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { displayName } from "@/lib/displayName";
 import { Board } from "./Board";
+import { BoardTabs } from "./BoardTabs";
 
 export default async function BoardPage({
   params,
@@ -68,6 +69,7 @@ export default async function BoardPage({
   const initialLists = boardLists.map((list) => ({
     id: list.id,
     title: list.title,
+    isDoneList: list.isDoneList,
     cards: boardCards
       .filter((card) => card.listId === list.id)
       .map((card) => ({
@@ -76,6 +78,7 @@ export default async function BoardPage({
         description: card.description,
         dueDate: card.dueDate,
         type: card.type as "task" | "backlog_item",
+        sprintId: card.sprintId,
         labelIds: cardLabelRows
           .filter((row) => row.cardId === card.id)
           .map((row) => row.labelId),
@@ -136,6 +139,19 @@ export default async function BoardPage({
       }),
   ];
 
+  const currentSprintRow = await db.query.sprints.findFirst({
+    where: and(eq(sprints.boardId, id), or(eq(sprints.status, "planned"), eq(sprints.status, "active"))),
+  });
+  const currentSprint = currentSprintRow
+    ? {
+        id: currentSprintRow.id,
+        name: currentSprintRow.name,
+        status: currentSprintRow.status as "planned" | "active",
+        startDate: currentSprintRow.startDate,
+        endDate: currentSprintRow.endDate,
+      }
+    : null;
+
   const activityRows = await db.query.activities.findMany({
     where: eq(activities.boardId, id),
     orderBy: (activity, { desc }) => desc(activity.createdAt),
@@ -169,12 +185,15 @@ export default async function BoardPage({
             <span className="text-border">/</span>
             <h1 className="text-lg font-semibold tracking-tight">{board.name}</h1>
           </div>
-          <Link
-            href="/profile"
-            className="cursor-pointer rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground"
-          >
-            Profile
-          </Link>
+          <div className="flex items-center gap-3">
+            <BoardTabs boardId={board.id} active="board" />
+            <Link
+              href="/profile"
+              className="cursor-pointer rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            >
+              Profile
+            </Link>
+          </div>
         </div>
       </header>
 
@@ -191,6 +210,7 @@ export default async function BoardPage({
           assignableMembers={assignableMembers}
           currentUserId={userId}
           initialActivities={initialActivities}
+          initialCurrentSprint={currentSprint}
         />
       </main>
     </div>

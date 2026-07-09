@@ -22,6 +22,7 @@ import {
   Bookmark,
   Calendar,
   Check,
+  CheckCircle2,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -33,6 +34,7 @@ import {
   ListChecks,
   Pencil,
   Plus,
+  Rocket,
   SquareCheck,
   Tag,
   Trash2,
@@ -56,12 +58,17 @@ import {
   moveCard,
   removeMember,
   renameChecklistItem,
+  completeSprint,
+  createSprint,
   reorderCards,
   reorderLists,
   revokeInviteLink,
   setCardLabel,
   setCardMember,
+  setCardSprint,
   setCardType,
+  setListDone,
+  startSprint,
   toggleChecklistItem,
   unblockMember,
   unlinkCards,
@@ -84,6 +91,7 @@ type CardItem = {
   checklistItems: ChecklistItem[];
   type: CardType;
   links: CardLink[];
+  sprintId: string | null;
 };
 
 const CARD_TYPES: Record<CardType, { label: string; icon: typeof SquareCheck; color: string }> = {
@@ -96,7 +104,14 @@ const LINK_RELATION_LABELS: Record<LinkRelation, string> = {
   is_blocked_by: "Is blocked by",
   relates_to: "Relates to",
 };
-type ListData = { id: string; title: string; cards: CardItem[] };
+type ListData = { id: string; title: string; isDoneList: boolean; cards: CardItem[] };
+type CurrentSprint = {
+  id: string;
+  name: string;
+  status: "planned" | "active";
+  startDate: Date;
+  endDate: Date;
+};
 type CardUpdates = { title: string; description: string | null; dueDate: string | null };
 type CardCreateDetails = {
   title: string;
@@ -143,6 +158,17 @@ function timeAgo(date: Date) {
   const days = Math.floor(hours / 24);
   if (days < 7) return `${days}d ago`;
   return date.toLocaleDateString();
+}
+
+function sprintCountdown(sprint: CurrentSprint) {
+  if (sprint.status === "planned") {
+    return { text: `Starts ${sprint.startDate.toLocaleDateString()}`, urgent: false };
+  }
+  const days = Math.ceil((sprint.endDate.getTime() - Date.now()) / (24 * 60 * 60 * 1000));
+  if (days < 0) return { text: `Overdue by ${Math.abs(days)}d`, urgent: true };
+  if (days === 0) return { text: "Ends today", urgent: true };
+  if (days === 1) return { text: "1 day left", urgent: true };
+  return { text: `${days} days left`, urgent: days <= 3 };
 }
 
 function ActivitySidebar({
@@ -277,6 +303,7 @@ export function Board({
   assignableMembers,
   currentUserId,
   initialActivities,
+  initialCurrentSprint,
 }: {
   boardId: string;
   initialLists: ListData[];
@@ -289,17 +316,20 @@ export function Board({
   assignableMembers: AssignableMember[];
   currentUserId: string;
   initialActivities: Activity[];
+  initialCurrentSprint: CurrentSprint | null;
 }) {
   const [lists, setLists] = useState(initialLists);
   const [boardLabels, setBoardLabels] = useState(initialLabels);
   const [members, setMembers] = useState(initialMembers);
   const [inviteToken, setInviteToken] = useState(initialInviteToken);
+  const [currentSprint, setCurrentSprint] = useState(initialCurrentSprint);
   const [showLabelText, setShowLabelText] = useState(false);
   const showLabelTextKey = `joinboard:showLabelText:${boardId}`;
   const [editingListId, setEditingListId] = useState<string | null>(null);
   const [detailCardId, setDetailCardId] = useState<string | null>(null);
   const [creatingCardListId, setCreatingCardListId] = useState<string | null>(null);
   const [showMembers, setShowMembers] = useState(false);
+  const [showCreateSprint, setShowCreateSprint] = useState(false);
   const [activities, setActivities] = useState(initialActivities);
   const [activityCollapsed, setActivityCollapsed] = useState(false);
   const [, startTransition] = useTransition();
@@ -422,7 +452,7 @@ export function Board({
     input.value = "";
 
     const { list, activity } = await createList(boardId, title);
-    setLists((prev) => [...prev, { id: list.id, title: list.title, cards: [] }]);
+    setLists((prev) => [...prev, { id: list.id, title: list.title, isDoneList: false, cards: [] }]);
     pushActivity(activity);
   }
 
@@ -470,6 +500,7 @@ export function Board({
                   checklistItems,
                   type: card.type as CardType,
                   links: [],
+                  sprintId: null,
                 },
               ],
             }
@@ -559,6 +590,57 @@ export function Board({
       })),
     );
     const { activity } = await setCardType(cardId, type);
+    pushActivity(activity);
+  }
+
+  async function handleSetCardSprint(cardId: string, sprintId: string | null) {
+    setLists((prev) =>
+      prev.map((list) => ({
+        ...list,
+        cards: list.cards.map((card) => (card.id === cardId ? { ...card, sprintId } : card)),
+      })),
+    );
+    const { activity } = await setCardSprint(cardId, sprintId);
+    pushActivity(activity);
+  }
+
+  async function handleCreateSprint(name: string, startDate: string, endDate: string) {
+    try {
+      const { sprint, activity } = await createSprint(boardId, name, startDate, endDate);
+      setCurrentSprint({
+        id: sprint.id,
+        name: sprint.name,
+        status: sprint.status as "planned" | "active",
+        startDate: sprint.startDate,
+        endDate: sprint.endDate,
+      });
+      pushActivity(activity);
+      setShowCreateSprint(false);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Couldn't create sprint");
+    }
+  }
+
+  async function handleStartSprint(sprintId: string) {
+    setCurrentSprint((prev) => (prev ? { ...prev, status: "active" } : prev));
+    const { activity } = await startSprint(sprintId);
+    pushActivity(activity);
+  }
+
+  async function handleCompleteSprint(sprintId: string) {
+    setCurrentSprint(null);
+    const { activity } = await completeSprint(sprintId);
+    pushActivity(activity);
+  }
+
+  async function handleSetListDone(listId: string, isDone: boolean) {
+    setLists((prev) =>
+      prev.map((list) => ({
+        ...list,
+        isDoneList: list.id === listId ? isDone : isDone ? false : list.isDoneList,
+      })),
+    );
+    const { activity } = await setListDone(listId, isDone);
     pushActivity(activity);
   }
 
@@ -793,15 +875,66 @@ export function Board({
     list.cards.some((card) => card.id === detailCardId),
   )?.id;
 
+  const doneList = lists.find((list) => list.isDoneList);
+  const sprintCards = currentSprint
+    ? lists.flatMap((list) => list.cards).filter((card) => card.sprintId === currentSprint.id)
+    : [];
+  const sprintDoneCount = doneList
+    ? sprintCards.filter((card) => doneList.cards.some((c) => c.id === card.id)).length
+    : 0;
+
   return (
     <div className="flex flex-1 gap-4 overflow-hidden">
       <div className="flex flex-1 flex-col gap-4 overflow-hidden">
-        <div>
+        <div className="flex items-start justify-between gap-3">
           <MemberAvatarStack
             ownerDisplayName={ownerDisplayName}
             members={members}
             onClick={() => setShowMembers(true)}
           />
+
+          {currentSprint ? (
+            <div className="flex items-center gap-3 rounded-lg border bg-card px-3 py-2">
+              <Rocket className="h-4 w-4 shrink-0 text-primary" />
+              <div className="flex flex-col">
+                <span className="text-sm font-medium">{currentSprint.name}</span>
+                <span
+                  className={`text-xs ${
+                    sprintCountdown(currentSprint).urgent ? "font-medium text-destructive" : "text-muted-foreground"
+                  }`}
+                >
+                  {sprintCountdown(currentSprint).text}
+                  {currentSprint.status === "active" && ` · ${sprintDoneCount}/${sprintCards.length} done`}
+                </span>
+              </div>
+              {currentSprint.status === "planned" ? (
+                <button
+                  type="button"
+                  onClick={() => handleStartSprint(currentSprint.id)}
+                  className="cursor-pointer rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground shadow-sm transition hover:bg-primary-hover active:scale-[0.98]"
+                >
+                  Start sprint
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => handleCompleteSprint(currentSprint.id)}
+                  className="cursor-pointer rounded-md border bg-card px-2.5 py-1 text-xs font-medium transition hover:bg-muted"
+                >
+                  Complete sprint
+                </button>
+              )}
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowCreateSprint(true)}
+              className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-dashed px-3 py-2 text-xs font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            >
+              <Rocket className="h-3.5 w-3.5" />
+              No active sprint — start one
+            </button>
+          )}
         </div>
 
         <DndContext
@@ -821,11 +954,13 @@ export function Board({
                   assignableMembers={assignableMembers}
                   showLabelText={showLabelText}
                   onToggleLabelText={handleToggleLabelText}
+                  currentSprint={currentSprint}
                   isEditing={editingListId === list.id}
                   onStartEdit={() => setEditingListId(list.id)}
                   onCancelEdit={() => setEditingListId(null)}
                   onRename={handleRenameList}
                   onDelete={handleDeleteList}
+                  onToggleDone={handleSetListDone}
                   onAddCard={setCreatingCardListId}
                   onOpenCardDetail={setDetailCardId}
                   onDeleteCard={handleDeleteCard}
@@ -875,6 +1010,8 @@ export function Board({
               onToggleChecklistItem={handleToggleChecklistItem}
               onDeleteChecklistItem={handleDeleteChecklistItem}
               onSetType={handleSetCardType}
+              currentSprint={currentSprint}
+              onSetSprint={handleSetCardSprint}
               onLinkCard={handleLinkCard}
               onUnlinkCard={handleUnlinkCard}
               onNavigateToCard={setDetailCardId}
@@ -908,6 +1045,10 @@ export function Board({
             onRevokeInviteLink={handleRevokeInviteLink}
           />
         )}
+
+        {showCreateSprint && (
+          <CreateSprintModal onClose={() => setShowCreateSprint(false)} onCreate={handleCreateSprint} />
+        )}
       </div>
       <ActivitySidebar
         activities={activities}
@@ -924,11 +1065,13 @@ function SortableList({
   assignableMembers,
   showLabelText,
   onToggleLabelText,
+  currentSprint,
   isEditing,
   onStartEdit,
   onCancelEdit,
   onRename,
   onDelete,
+  onToggleDone,
   onAddCard,
   onOpenCardDetail,
   onDeleteCard,
@@ -938,11 +1081,13 @@ function SortableList({
   assignableMembers: AssignableMember[];
   showLabelText: boolean;
   onToggleLabelText: () => void;
+  currentSprint: CurrentSprint | null;
   isEditing: boolean;
   onStartEdit: () => void;
   onCancelEdit: () => void;
   onRename: (listId: string, title: string) => void;
   onDelete: (listId: string) => void;
+  onToggleDone: (listId: string, isDone: boolean) => void;
   onAddCard: (listId: string) => void;
   onOpenCardDetail: (cardId: string) => void;
   onDeleteCard: (cardId: string) => void;
@@ -995,7 +1140,21 @@ function SortableList({
             <GripVertical className="h-4 w-4" />
           </span>
           <span className="flex-1 truncate font-semibold tracking-tight">{list.title}</span>
+          {list.isDoneList && (
+            <span className="shrink-0 rounded bg-accent-tint px-1.5 py-0.5 text-[11px] font-medium text-accent">
+              Done
+            </span>
+          )}
           <div className="flex shrink-0 gap-0.5 opacity-0 transition group-hover/list:opacity-100">
+            <button
+              type="button"
+              onClick={() => onToggleDone(list.id, !list.isDoneList)}
+              aria-label={list.isDoneList ? "Unmark as Done list" : "Mark as Done list"}
+              title={list.isDoneList ? "Unmark as Done list" : "Mark as Done list"}
+              className={list.isDoneList ? `${iconButtonClass} text-accent` : iconButtonClass}
+            >
+              <CheckCircle2 className="h-3.5 w-3.5" />
+            </button>
             <button type="button" onClick={onStartEdit} aria-label="Rename list" className={iconButtonClass}>
               <Pencil className="h-3.5 w-3.5" />
             </button>
@@ -1021,6 +1180,7 @@ function SortableList({
               assignableMembers={assignableMembers}
               showLabelText={showLabelText}
               onToggleLabelText={onToggleLabelText}
+              currentSprint={currentSprint}
               onOpenDetail={() => onOpenCardDetail(card.id)}
               onDelete={onDeleteCard}
             />
@@ -1046,6 +1206,7 @@ function SortableCard({
   assignableMembers,
   showLabelText,
   onToggleLabelText,
+  currentSprint,
   onOpenDetail,
   onDelete,
 }: {
@@ -1054,6 +1215,7 @@ function SortableCard({
   assignableMembers: AssignableMember[];
   showLabelText: boolean;
   onToggleLabelText: () => void;
+  currentSprint: CurrentSprint | null;
   onOpenDetail: () => void;
   onDelete: (cardId: string) => void;
 }) {
@@ -1089,6 +1251,12 @@ function SortableCard({
           <CardTypeIcon className="h-3 w-3" />
           {cardType.label}
         </span>
+        {currentSprint && card.sprintId === currentSprint.id && (
+          <span className="ml-1 inline-flex items-center gap-1 rounded bg-primary-tint px-1.5 py-0.5 text-[11px] font-medium text-primary">
+            <Rocket className="h-3 w-3" />
+            Sprint
+          </span>
+        )}
       </div>
 
       {cardLabels.length > 0 && (
@@ -1204,6 +1372,8 @@ function CardDetailModal({
   onToggleChecklistItem,
   onDeleteChecklistItem,
   onSetType,
+  currentSprint,
+  onSetSprint,
   onLinkCard,
   onUnlinkCard,
   onNavigateToCard,
@@ -1227,6 +1397,8 @@ function CardDetailModal({
   onToggleChecklistItem: (cardId: string, itemId: string, completed: boolean) => void;
   onDeleteChecklistItem: (cardId: string, itemId: string) => void;
   onSetType: (cardId: string, type: CardType) => void;
+  currentSprint: CurrentSprint | null;
+  onSetSprint: (cardId: string, sprintId: string | null) => void;
   onLinkCard: (cardId: string, targetCardId: string, relation: LinkRelation) => void;
   onUnlinkCard: (linkId: string) => void;
   onNavigateToCard: (cardId: string) => void;
@@ -1350,6 +1522,32 @@ function CardDetailModal({
               )}
             </div>
           </div>
+
+          {currentSprint && (
+            <div className="flex flex-col gap-1.5">
+              <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+                <Rocket className="h-3.5 w-3.5" />
+                Sprint
+              </span>
+              {card.sprintId === currentSprint.id ? (
+                <button
+                  type="button"
+                  onClick={() => onSetSprint(card.id, null)}
+                  className="flex cursor-pointer items-center gap-1.5 self-start rounded-full border-2 border-primary bg-primary-tint px-2.5 py-1 text-left text-xs font-medium text-primary transition"
+                >
+                  In &quot;{currentSprint.name}&quot; — remove
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onSetSprint(card.id, currentSprint.id)}
+                  className="cursor-pointer self-start rounded-full border-2 border-transparent bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground transition hover:bg-border/60"
+                >
+                  Add to &quot;{currentSprint.name}&quot;
+                </button>
+              )}
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <label className="flex flex-col gap-1.5 text-sm font-medium text-muted-foreground">
@@ -2177,6 +2375,101 @@ function CreateCardModal({
               className="cursor-pointer rounded-md bg-primary px-3.5 py-1.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:bg-primary-hover active:scale-[0.98]"
             >
               Add card
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function CreateSprintModal({
+  onClose,
+  onCreate,
+}: {
+  onClose: () => void;
+  onCreate: (name: string, startDate: string, endDate: string) => void;
+}) {
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  return (
+    <div
+      className="animate-overlay-in fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        onClick={(event) => event.stopPropagation()}
+        className="animate-modal-in w-full max-w-sm rounded-lg border bg-card p-5 shadow-lg"
+      >
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            const form = event.currentTarget;
+            const name = (form.elements.namedItem("name") as HTMLInputElement).value;
+            const startDate = (form.elements.namedItem("startDate") as HTMLInputElement).value;
+            const endDate = (form.elements.namedItem("endDate") as HTMLInputElement).value;
+            onCreate(name, startDate, endDate);
+          }}
+          className="flex flex-col gap-4"
+        >
+          <h2 className="flex items-center gap-1.5 text-base font-semibold tracking-tight">
+            <Rocket className="h-4 w-4" />
+            New sprint
+          </h2>
+
+          <label className="flex flex-col gap-1.5 text-sm font-medium text-muted-foreground">
+            Name
+            <input
+              name="name"
+              placeholder="Sprint 1"
+              autoFocus
+              required
+              className="rounded-md border bg-background px-2.5 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
+            />
+          </label>
+
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex flex-col gap-1.5 text-sm font-medium text-muted-foreground">
+              Start date
+              <input
+                name="startDate"
+                type="date"
+                required
+                className="rounded-md border bg-background px-2.5 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
+              />
+            </label>
+            <label className="flex flex-col gap-1.5 text-sm font-medium text-muted-foreground">
+              End date
+              <input
+                name="endDate"
+                type="date"
+                required
+                className="rounded-md border bg-background px-2.5 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
+              />
+            </label>
+          </div>
+
+          <div className="flex items-center justify-end gap-2 border-t pt-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="cursor-pointer rounded-md border bg-card px-3.5 py-1.5 text-sm font-medium transition hover:bg-muted"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="cursor-pointer rounded-md bg-primary px-3.5 py-1.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:bg-primary-hover active:scale-[0.98]"
+            >
+              Create sprint
             </button>
           </div>
         </form>
