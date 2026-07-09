@@ -32,6 +32,7 @@ import {
   ChevronUp,
   Copy,
   Equal,
+  Filter,
   GripVertical,
   Hash,
   History,
@@ -41,6 +42,7 @@ import {
   Pencil,
   Plus,
   Rocket,
+  Search,
   SquareCheck,
   Tag,
   Trash2,
@@ -208,6 +210,33 @@ function sprintCountdown(sprint: CurrentSprint) {
   return { text: `${days} days left`, urgent: days <= 3 };
 }
 
+type CardFilters = {
+  filterMemberIds: string[];
+  filterLabelIds: string[];
+  filterTypes: CardType[];
+  filterOverdueOnly: boolean;
+};
+
+function cardMatchesFilters(card: CardItem, filters: CardFilters, now: number) {
+  if (filters.filterMemberIds.length > 0 && !filters.filterMemberIds.some((id) => card.memberIds.includes(id))) {
+    return false;
+  }
+  if (filters.filterLabelIds.length > 0 && !filters.filterLabelIds.some((id) => card.labelIds.includes(id))) {
+    return false;
+  }
+  if (filters.filterTypes.length > 0 && !filters.filterTypes.includes(card.type)) return false;
+  if (filters.filterOverdueOnly && !(card.dueDate && card.dueDate.getTime() < now)) return false;
+  return true;
+}
+
+function filterVisibleLists(lists: ListData[], filters: CardFilters): ListData[] {
+  const now = Date.now();
+  return lists.map((list) => ({
+    ...list,
+    cards: list.cards.filter((card) => cardMatchesFilters(card, filters, now)),
+  }));
+}
+
 function ActivitySidebar({
   activities,
   collapsed,
@@ -370,6 +399,13 @@ export function Board({
   const [movingCardId, setMovingCardId] = useState<string | null>(null);
   const [showMembers, setShowMembers] = useState(false);
   const [showCreateSprint, setShowCreateSprint] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchDropdownOpen, setSearchDropdownOpen] = useState(false);
+  const [filterMemberIds, setFilterMemberIds] = useState<string[]>([]);
+  const [filterLabelIds, setFilterLabelIds] = useState<string[]>([]);
+  const [filterTypes, setFilterTypes] = useState<CardType[]>([]);
+  const [filterOverdueOnly, setFilterOverdueOnly] = useState(false);
+  const [showFilterPicker, setShowFilterPicker] = useState(false);
   const [activities, setActivities] = useState(initialActivities);
   const [activityCollapsed, setActivityCollapsed] = useState(false);
   const [, startTransition] = useTransition();
@@ -1012,6 +1048,37 @@ export function Board({
     ? sprintCards.filter((card) => doneList.cards.some((c) => c.id === card.id)).length
     : 0;
 
+  const hasActiveFilters =
+    filterMemberIds.length > 0 || filterLabelIds.length > 0 || filterTypes.length > 0 || filterOverdueOnly;
+  const activeFilterCount =
+    filterMemberIds.length + filterLabelIds.length + filterTypes.length + (filterOverdueOnly ? 1 : 0);
+
+  const visibleLists = hasActiveFilters
+    ? filterVisibleLists(lists, { filterMemberIds, filterLabelIds, filterTypes, filterOverdueOnly })
+    : lists;
+  const totalCardCount = lists.reduce((sum, list) => sum + list.cards.length, 0);
+  const visibleCardCount = visibleLists.reduce((sum, list) => sum + list.cards.length, 0);
+
+  const searchResults = searchQuery.trim()
+    ? lists
+        .flatMap((list) => list.cards.map((card) => ({ card, listTitle: list.title })))
+        .filter(({ card }) => card.title.toLowerCase().includes(searchQuery.trim().toLowerCase()))
+        .slice(0, 8)
+    : [];
+
+  function handleSelectSearchResult(cardId: string) {
+    setDetailCardId(cardId);
+    setSearchQuery("");
+    setSearchDropdownOpen(false);
+  }
+
+  function clearFilters() {
+    setFilterMemberIds([]);
+    setFilterLabelIds([]);
+    setFilterTypes([]);
+    setFilterOverdueOnly(false);
+  }
+
   return (
     <div className="flex flex-1 gap-4 overflow-hidden">
       <div className="flex flex-1 flex-col gap-4 overflow-hidden">
@@ -1066,6 +1133,219 @@ export function Board({
           )}
         </div>
 
+        <div className="flex items-center gap-2">
+          <div className="relative w-full max-w-xs">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <input
+              type="text"
+              value={searchQuery}
+              onFocus={() => setSearchDropdownOpen(true)}
+              onChange={(event) => {
+                setSearchQuery(event.target.value);
+                setSearchDropdownOpen(true);
+              }}
+              onBlur={() => setSearchDropdownOpen(false)}
+              placeholder="Search cards…"
+              className="w-full rounded-md border bg-card py-1.5 pl-8 pr-2.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
+            />
+            {searchDropdownOpen && searchQuery.trim() && (
+              <div className="absolute z-30 mt-1 max-h-72 w-full overflow-y-auto rounded-md border bg-card shadow-md">
+                {searchResults.length > 0 ? (
+                  searchResults.map(({ card, listTitle }) => {
+                    const cardType = CARD_TYPES[card.type];
+                    const TypeIcon = cardType.icon;
+                    return (
+                      <button
+                        key={card.id}
+                        type="button"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => handleSelectSearchResult(card.id)}
+                        className="flex w-full cursor-pointer items-center gap-2 px-2.5 py-2 text-left text-sm transition hover:bg-muted"
+                      >
+                        <TypeIcon className="h-3.5 w-3.5 shrink-0" style={{ color: cardType.color }} />
+                        <span className="flex-1 truncate">{card.title}</span>
+                        <span className="shrink-0 text-xs text-muted-foreground">{listTitle}</span>
+                      </button>
+                    );
+                  })
+                ) : (
+                  <p className="px-2.5 py-2 text-sm text-muted-foreground">No cards found</p>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowFilterPicker((prev) => !prev)}
+              className={
+                showFilterPicker || activeFilterCount > 0
+                  ? "flex cursor-pointer items-center gap-1.5 rounded-md bg-foreground px-2.5 py-1.5 text-xs font-medium text-background transition"
+                  : "flex cursor-pointer items-center gap-1.5 rounded-md border bg-card px-2.5 py-1.5 text-xs font-medium transition hover:bg-muted"
+              }
+            >
+              <Filter className="h-3.5 w-3.5" />
+              Filters
+              {activeFilterCount > 0 && (
+                <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
+            {showFilterPicker && (
+              <>
+                <div className="fixed inset-0 z-20" onClick={() => setShowFilterPicker(false)} />
+                <div className="animate-modal-in absolute left-0 top-full z-30 mt-2 w-72 rounded-lg border bg-card p-4 shadow-lg">
+                  <div className="mb-3 flex items-center justify-between">
+                    <h4 className="text-sm font-semibold tracking-tight">Filters</h4>
+                    <button
+                      type="button"
+                      onClick={() => setShowFilterPicker(false)}
+                      aria-label="Close"
+                      className={iconButtonClass}
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  <div className="flex flex-col gap-3">
+                    <div className="flex flex-col gap-1.5">
+                      <span className="text-xs font-semibold text-muted-foreground">Assignee</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {assignableMembers.map((member) => {
+                          const active = filterMemberIds.includes(member.userId);
+                          return (
+                            <button
+                              key={member.userId}
+                              type="button"
+                              onClick={() =>
+                                setFilterMemberIds((prev) =>
+                                  active ? prev.filter((id) => id !== member.userId) : [...prev, member.userId],
+                                )
+                              }
+                              title={member.displayName}
+                              className={
+                                active
+                                  ? "flex cursor-pointer items-center gap-1 rounded-full border-2 border-primary bg-primary-tint py-0.5 pl-0.5 pr-2 text-xs font-medium text-primary transition"
+                                  : "flex cursor-pointer items-center gap-1 rounded-full border-2 border-transparent bg-muted py-0.5 pl-0.5 pr-2 text-xs font-medium text-muted-foreground transition hover:bg-border/60"
+                              }
+                            >
+                              <span
+                                style={{ backgroundColor: avatarColor(member.displayName) }}
+                                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+                              >
+                                {member.displayName.charAt(0).toUpperCase()}
+                              </span>
+                              {member.displayName}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {boardLabels.length > 0 && (
+                      <div className="flex flex-col gap-1.5">
+                        <span className="text-xs font-semibold text-muted-foreground">Labels</span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {boardLabels.map((label) => {
+                            const active = filterLabelIds.includes(label.id);
+                            return (
+                              <button
+                                key={label.id}
+                                type="button"
+                                onClick={() =>
+                                  setFilterLabelIds((prev) =>
+                                    active ? prev.filter((id) => id !== label.id) : [...prev, label.id],
+                                  )
+                                }
+                                style={
+                                  active
+                                    ? { backgroundColor: label.color, borderColor: label.color }
+                                    : { borderColor: label.color, color: label.color }
+                                }
+                                className={
+                                  active
+                                    ? "cursor-pointer rounded-full border-2 px-2.5 py-1 text-xs font-medium text-white transition"
+                                    : "cursor-pointer rounded-full border-2 bg-transparent px-2.5 py-1 text-xs font-medium transition"
+                                }
+                              >
+                                {active ? `✓ ${label.name}` : label.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex flex-col gap-1.5">
+                      <span className="text-xs font-semibold text-muted-foreground">Type</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {(Object.entries(CARD_TYPES) as [CardType, (typeof CARD_TYPES)[CardType]][]).map(
+                          ([value, config]) => {
+                            const active = filterTypes.includes(value);
+                            const TypeIcon = config.icon;
+                            return (
+                              <button
+                                key={value}
+                                type="button"
+                                onClick={() =>
+                                  setFilterTypes((prev) =>
+                                    active ? prev.filter((v) => v !== value) : [...prev, value],
+                                  )
+                                }
+                                style={
+                                  active
+                                    ? { backgroundColor: config.color, borderColor: config.color }
+                                    : { borderColor: config.color, color: config.color }
+                                }
+                                className={
+                                  active
+                                    ? "flex cursor-pointer items-center gap-1.5 rounded-full border-2 px-2.5 py-1 text-xs font-medium text-white transition"
+                                    : "flex cursor-pointer items-center gap-1.5 rounded-full border-2 bg-transparent px-2.5 py-1 text-xs font-medium transition"
+                                }
+                              >
+                                <TypeIcon className="h-3.5 w-3.5" />
+                                {config.label}
+                              </button>
+                            );
+                          },
+                        )}
+                      </div>
+                    </div>
+
+                    <label className="flex cursor-pointer items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={filterOverdueOnly}
+                        onChange={(event) => setFilterOverdueOnly(event.target.checked)}
+                        className="h-4 w-4 cursor-pointer rounded border-border accent-primary"
+                      />
+                      Overdue only
+                    </label>
+                  </div>
+
+                  {hasActiveFilters && (
+                    <button
+                      type="button"
+                      onClick={clearFilters}
+                      className="mt-3 cursor-pointer text-xs font-medium text-primary hover:underline"
+                    >
+                      Clear all filters
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+
+          {hasActiveFilters && (
+            <span className="text-xs text-muted-foreground">
+              {visibleCardCount} of {totalCardCount} cards
+            </span>
+          )}
+        </div>
+
         <DndContext
           id={boardId}
           sensors={sensors}
@@ -1075,7 +1355,7 @@ export function Board({
         >
           <div className="flex flex-1 items-start gap-4 overflow-x-auto pb-4">
             <SortableContext items={lists.map((list) => list.id)} strategy={horizontalListSortingStrategy}>
-              {lists.map((list) => (
+              {visibleLists.map((list) => (
                 <SortableList
                   key={list.id}
                   list={list}
