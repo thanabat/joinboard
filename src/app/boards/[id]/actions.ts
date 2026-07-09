@@ -80,12 +80,15 @@ async function requireCardAccess(cardId: string) {
   return { card, list, board, userId };
 }
 
-export async function createCard(listId: string, title: string) {
+export async function createCard(
+  listId: string,
+  details: { title: string; description: string | null; dueDate: string | null; type: string },
+) {
   const list = await db.query.lists.findFirst({ where: eq(lists.id, listId) });
   if (!list) throw new Error("List not found");
   const { userId } = await requireBoardAccess(list.boardId);
 
-  const trimmed = title.trim();
+  const trimmed = details.title.trim();
   if (!trimmed) throw new Error("Title is required");
 
   const [{ maxPosition }] = await db
@@ -95,7 +98,14 @@ export async function createCard(listId: string, title: string) {
 
   const [card] = await db
     .insert(cards)
-    .values({ listId, title: trimmed, position: (maxPosition ?? 0) + 1 })
+    .values({
+      listId,
+      title: trimmed,
+      description: details.description?.trim() || null,
+      dueDate: details.dueDate ? new Date(details.dueDate) : null,
+      type: details.type,
+      position: (maxPosition ?? 0) + 1,
+    })
     .returning();
 
   const activity = await logActivity(

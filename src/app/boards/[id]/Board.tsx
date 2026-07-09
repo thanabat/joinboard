@@ -22,8 +22,10 @@ import {
   Bookmark,
   Calendar,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Copy,
   GripVertical,
   History,
@@ -96,6 +98,15 @@ const LINK_RELATION_LABELS: Record<LinkRelation, string> = {
 };
 type ListData = { id: string; title: string; cards: CardItem[] };
 type CardUpdates = { title: string; description: string | null; dueDate: string | null };
+type CardCreateDetails = {
+  title: string;
+  description: string | null;
+  dueDate: string | null;
+  type: CardType;
+  labelIds: string[];
+  memberIds: string[];
+  checklistItemTitles: string[];
+};
 type Member = { userId: string; email: string; displayName: string; status: string };
 type AssignableMember = { userId: string; email: string; displayName: string };
 type Activity = { id: string; message: string; actorName: string; createdAt: Date };
@@ -286,6 +297,7 @@ export function Board({
   const [showLabelText, setShowLabelText] = useState(false);
   const [editingListId, setEditingListId] = useState<string | null>(null);
   const [detailCardId, setDetailCardId] = useState<string | null>(null);
+  const [creatingCardListId, setCreatingCardListId] = useState<string | null>(null);
   const [showMembers, setShowMembers] = useState(false);
   const [activities, setActivities] = useState(initialActivities);
   const [activityCollapsed, setActivityCollapsed] = useState(false);
@@ -400,8 +412,33 @@ export function Board({
     pushActivity(activity);
   }
 
-  async function handleAddCard(listId: string) {
-    const { card, activity } = await createCard(listId, "New card");
+  async function handleCreateCard(listId: string, details: CardCreateDetails) {
+    const { card, activity } = await createCard(listId, {
+      title: details.title,
+      description: details.description,
+      dueDate: details.dueDate,
+      type: details.type,
+    });
+    pushActivity(activity);
+
+    const labelResults = await Promise.all(
+      details.labelIds.map((labelId) => setCardLabel(card.id, labelId, true)),
+    );
+    labelResults.forEach((result) => pushActivity(result.activity));
+
+    const memberResults = await Promise.all(
+      details.memberIds.map((userId) => setCardMember(card.id, userId, true)),
+    );
+    memberResults.forEach((result) => pushActivity(result.activity));
+
+    // Sequential so each item's auto-assigned position strictly increases.
+    const checklistItems: ChecklistItem[] = [];
+    for (const title of details.checklistItemTitles) {
+      const { item, activity: itemActivity } = await createChecklistItem(card.id, title);
+      checklistItems.push(item);
+      pushActivity(itemActivity);
+    }
+
     setLists((prev) =>
       prev.map((list) =>
         list.id === listId
@@ -412,11 +449,11 @@ export function Board({
                 {
                   id: card.id,
                   title: card.title,
-                  description: null,
-                  dueDate: null,
-                  labelIds: [],
-                  memberIds: [],
-                  checklistItems: [],
+                  description: card.description,
+                  dueDate: card.dueDate,
+                  labelIds: details.labelIds,
+                  memberIds: details.memberIds,
+                  checklistItems,
                   type: card.type as CardType,
                   links: [],
                 },
@@ -425,8 +462,7 @@ export function Board({
           : list,
       ),
     );
-    setDetailCardId(card.id);
-    pushActivity(activity);
+    setCreatingCardListId(null);
   }
 
   async function handleRenameList(listId: string, title: string) {
@@ -776,7 +812,7 @@ export function Board({
                   onCancelEdit={() => setEditingListId(null)}
                   onRename={handleRenameList}
                   onDelete={handleDeleteList}
-                  onAddCard={handleAddCard}
+                  onAddCard={setCreatingCardListId}
                   onOpenCardDetail={setDetailCardId}
                   onDeleteCard={handleDeleteCard}
                 />
@@ -828,6 +864,17 @@ export function Board({
               onLinkCard={handleLinkCard}
               onUnlinkCard={handleUnlinkCard}
               onNavigateToCard={setDetailCardId}
+            />
+          )}
+
+          {creatingCardListId && (
+            <CreateCardModal
+              boardLabels={boardLabels}
+              assignableMembers={assignableMembers}
+              currentUserId={currentUserId}
+              onClose={() => setCreatingCardListId(null)}
+              onCreate={(details) => handleCreateCard(creatingCardListId, details)}
+              onCreateLabel={handleCreateLabel}
             />
           )}
         </DndContext>
@@ -1174,6 +1221,7 @@ function CardDetailModal({
   const newLabelColorRef = useRef<HTMLInputElement>(null);
   const newChecklistItemRef = useRef<HTMLInputElement>(null);
   const renameChecklistItemRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [memberQuery, setMemberQuery] = useState("");
   const [memberDropdownOpen, setMemberDropdownOpen] = useState(false);
   const [editingChecklistItemId, setEditingChecklistItemId] = useState<string | null>(null);
@@ -1257,77 +1305,6 @@ function CardDetailModal({
             />
           </label>
 
-          <div className="flex flex-col gap-2">
-            <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
-              <Tag className="h-3.5 w-3.5" />
-              Labels
-            </span>
-            <div className="flex flex-wrap gap-1.5">
-              {boardLabels.map((label) => {
-                const assigned = card.labelIds.includes(label.id);
-                return (
-                  <div
-                    key={label.id}
-                    style={
-                      assigned
-                        ? { backgroundColor: label.color, borderColor: label.color }
-                        : { borderColor: label.color, color: label.color }
-                    }
-                    className={
-                      assigned
-                        ? "group/label flex items-center gap-1 rounded-full border-2 py-1 pl-2.5 pr-1.5 text-xs font-medium text-white transition"
-                        : "group/label flex items-center gap-1 rounded-full border-2 bg-transparent py-1 pl-2.5 pr-1.5 text-xs font-medium transition"
-                    }
-                  >
-                    <button
-                      type="button"
-                      onClick={() => onToggleLabel(card.id, label.id, !assigned)}
-                      className="cursor-pointer"
-                    >
-                      {assigned ? `✓ ${label.name}` : label.name}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onDeleteLabel(label.id)}
-                      aria-label={`Delete label ${label.name}`}
-                      className="cursor-pointer rounded-full p-0.5 opacity-0 transition hover:text-destructive group-hover/label:opacity-100"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-            <div className="flex gap-2">
-              <input
-                type="color"
-                defaultValue="#4f46e5"
-                ref={newLabelColorRef}
-                className="h-9 w-11 cursor-pointer rounded-md border bg-background p-1"
-              />
-              <input
-                type="text"
-                ref={newLabelNameRef}
-                placeholder="New label"
-                className="flex-1 rounded-md border bg-background px-2.5 py-1.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
-              />
-              <button
-                type="button"
-                aria-label="Add label"
-                onClick={() => {
-                  const name = newLabelNameRef.current?.value.trim();
-                  if (!name) return;
-                  onCreateLabel(name, newLabelColorRef.current!.value);
-                  newLabelNameRef.current!.value = "";
-                }}
-                className="flex cursor-pointer items-center gap-1 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground transition hover:bg-primary-hover"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                Add
-              </button>
-            </div>
-          </div>
-
           <div className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-muted-foreground">Type</span>
             <div className="flex flex-wrap gap-1.5">
@@ -1390,11 +1367,93 @@ function CardDetailModal({
             </label>
           </div>
 
-          <div className="flex flex-col gap-2">
-            <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
-              <Users className="h-3.5 w-3.5" />
-              Members
-            </span>
+          <button
+            type="button"
+            onClick={() => setShowAdvanced((prev) => !prev)}
+            className="flex cursor-pointer items-center gap-1 self-start text-sm font-medium text-primary hover:underline"
+          >
+            {showAdvanced ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            {showAdvanced ? "Hide advanced options" : "Advanced options"}
+          </button>
+
+          {showAdvanced && (
+            <>
+              <div className="flex flex-col gap-2">
+                <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+                  <Tag className="h-3.5 w-3.5" />
+                  Labels
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {boardLabels.map((label) => {
+                    const assigned = card.labelIds.includes(label.id);
+                    return (
+                      <div
+                        key={label.id}
+                        style={
+                          assigned
+                            ? { backgroundColor: label.color, borderColor: label.color }
+                            : { borderColor: label.color, color: label.color }
+                        }
+                        className={
+                          assigned
+                            ? "group/label flex items-center gap-1 rounded-full border-2 py-1 pl-2.5 pr-1.5 text-xs font-medium text-white transition"
+                            : "group/label flex items-center gap-1 rounded-full border-2 bg-transparent py-1 pl-2.5 pr-1.5 text-xs font-medium transition"
+                        }
+                      >
+                        <button
+                          type="button"
+                          onClick={() => onToggleLabel(card.id, label.id, !assigned)}
+                          className="cursor-pointer"
+                        >
+                          {assigned ? `✓ ${label.name}` : label.name}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onDeleteLabel(label.id)}
+                          aria-label={`Delete label ${label.name}`}
+                          className="cursor-pointer rounded-full p-0.5 opacity-0 transition hover:text-destructive group-hover/label:opacity-100"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="color"
+                    defaultValue="#4f46e5"
+                    ref={newLabelColorRef}
+                    className="h-9 w-11 cursor-pointer rounded-md border bg-background p-1"
+                  />
+                  <input
+                    type="text"
+                    ref={newLabelNameRef}
+                    placeholder="New label"
+                    className="flex-1 rounded-md border bg-background px-2.5 py-1.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
+                  />
+                  <button
+                    type="button"
+                    aria-label="Add label"
+                    onClick={() => {
+                      const name = newLabelNameRef.current?.value.trim();
+                      if (!name) return;
+                      onCreateLabel(name, newLabelColorRef.current!.value);
+                      newLabelNameRef.current!.value = "";
+                    }}
+                    className="flex cursor-pointer items-center gap-1 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground transition hover:bg-primary-hover"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Add
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+                  <Users className="h-3.5 w-3.5" />
+                  Members
+                </span>
             <div className="flex flex-wrap gap-1.5">
               {assignableMembers
                 .filter((member) => card.memberIds.includes(member.userId))
@@ -1696,6 +1755,8 @@ function CardDetailModal({
               </div>
             </div>
           </div>
+            </>
+          )}
 
           <div className="flex items-center justify-between border-t pt-4">
             <button
@@ -1721,6 +1782,388 @@ function CardDetailModal({
                 Save
               </button>
             </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function CreateCardModal({
+  boardLabels,
+  assignableMembers,
+  currentUserId,
+  onClose,
+  onCreate,
+  onCreateLabel,
+}: {
+  boardLabels: Label[];
+  assignableMembers: AssignableMember[];
+  currentUserId: string;
+  onClose: () => void;
+  onCreate: (details: CardCreateDetails) => void;
+  onCreateLabel: (name: string, color: string) => void;
+}) {
+  const [type, setType] = useState<CardType>("task");
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>([]);
+  const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
+  const [draftChecklistItems, setDraftChecklistItems] = useState<{ id: string; title: string }[]>([]);
+  const [memberQuery, setMemberQuery] = useState("");
+  const [memberDropdownOpen, setMemberDropdownOpen] = useState(false);
+  const newLabelNameRef = useRef<HTMLInputElement>(null);
+  const newLabelColorRef = useRef<HTMLInputElement>(null);
+  const newChecklistItemRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  function toggleLabel(labelId: string, assigned: boolean) {
+    setSelectedLabelIds((prev) => (assigned ? [...prev, labelId] : prev.filter((id) => id !== labelId)));
+  }
+
+  function toggleMember(userId: string, assigned: boolean) {
+    setSelectedMemberIds((prev) => (assigned ? [...prev, userId] : prev.filter((id) => id !== userId)));
+  }
+
+  function addChecklistItem() {
+    const title = newChecklistItemRef.current?.value.trim();
+    if (!title) return;
+    setDraftChecklistItems((prev) => [...prev, { id: crypto.randomUUID(), title }]);
+    newChecklistItemRef.current!.value = "";
+  }
+
+  const unassignedMembers = assignableMembers.filter((member) => {
+    const query = memberQuery.trim().toLowerCase();
+    return (
+      !selectedMemberIds.includes(member.userId) &&
+      (member.displayName.toLowerCase().includes(query) || member.email.toLowerCase().includes(query))
+    );
+  });
+
+  return (
+    <div
+      className="animate-overlay-in fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        onClick={(event) => event.stopPropagation()}
+        className="animate-modal-in max-h-[85vh] w-full max-w-md overflow-y-auto rounded-lg border bg-card p-5 shadow-lg"
+      >
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            const form = event.currentTarget;
+            const title = (form.elements.namedItem("title") as HTMLInputElement).value;
+            const description = (form.elements.namedItem("description") as HTMLTextAreaElement).value;
+            const dueDate = (form.elements.namedItem("dueDate") as HTMLInputElement).value;
+            if (!title.trim()) return;
+            onCreate({
+              title,
+              description: description || null,
+              dueDate: dueDate || null,
+              type,
+              labelIds: selectedLabelIds,
+              memberIds: selectedMemberIds,
+              checklistItemTitles: draftChecklistItems.map((item) => item.title),
+            });
+          }}
+          className="flex flex-col gap-4"
+        >
+          <h2 className="text-base font-semibold tracking-tight">Add card</h2>
+
+          <input
+            name="title"
+            placeholder="Card title"
+            autoFocus
+            required
+            className="rounded-md border bg-background px-2.5 py-2 text-base font-semibold tracking-tight outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
+          />
+
+          <label className="flex flex-col gap-1.5 text-sm font-medium text-muted-foreground">
+            <span className="flex items-center gap-1.5">
+              <AlignLeft className="h-3.5 w-3.5" />
+              Description
+            </span>
+            <textarea
+              name="description"
+              placeholder="Add a more detailed description…"
+              rows={4}
+              className="rounded-md border bg-background px-2.5 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
+            />
+          </label>
+
+          <div className="flex flex-col gap-1.5">
+            <span className="text-sm font-medium text-muted-foreground">Type</span>
+            <div className="flex flex-wrap gap-1.5">
+              {(Object.entries(CARD_TYPES) as [CardType, (typeof CARD_TYPES)[CardType]][]).map(
+                ([value, config]) => {
+                  const selected = type === value;
+                  const TypeIcon = config.icon;
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setType(value)}
+                      style={
+                        selected
+                          ? { backgroundColor: config.color, borderColor: config.color }
+                          : { borderColor: config.color, color: config.color }
+                      }
+                      className={
+                        selected
+                          ? "flex cursor-pointer items-center gap-1.5 rounded-full border-2 px-2.5 py-1 text-left text-xs font-medium text-white transition"
+                          : "flex cursor-pointer items-center gap-1.5 rounded-full border-2 bg-transparent px-2.5 py-1 text-left text-xs font-medium transition"
+                      }
+                    >
+                      <TypeIcon className="h-3.5 w-3.5" />
+                      {config.label}
+                    </button>
+                  );
+                },
+              )}
+            </div>
+          </div>
+
+          <label className="flex flex-col gap-1.5 text-sm font-medium text-muted-foreground">
+            <span className="flex items-center gap-1.5">
+              <Calendar className="h-3.5 w-3.5" />
+              Due date
+            </span>
+            <input
+              name="dueDate"
+              type="date"
+              className="rounded-md border bg-background px-2.5 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
+            />
+          </label>
+
+          <button
+            type="button"
+            onClick={() => setShowAdvanced((prev) => !prev)}
+            className="flex cursor-pointer items-center gap-1 self-start text-sm font-medium text-primary hover:underline"
+          >
+            {showAdvanced ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            {showAdvanced ? "Hide advanced options" : "Advanced options"}
+          </button>
+
+          {showAdvanced && (
+            <>
+              <div className="flex flex-col gap-2">
+                <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+                  <Tag className="h-3.5 w-3.5" />
+                  Labels
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {boardLabels.map((label) => {
+                    const assigned = selectedLabelIds.includes(label.id);
+                    return (
+                      <button
+                        key={label.id}
+                        type="button"
+                        onClick={() => toggleLabel(label.id, !assigned)}
+                        style={
+                          assigned
+                            ? { backgroundColor: label.color, borderColor: label.color }
+                            : { borderColor: label.color, color: label.color }
+                        }
+                        className={
+                          assigned
+                            ? "cursor-pointer rounded-full border-2 px-2.5 py-1 text-left text-xs font-medium text-white transition"
+                            : "cursor-pointer rounded-full border-2 bg-transparent px-2.5 py-1 text-left text-xs font-medium transition"
+                        }
+                      >
+                        {assigned ? `✓ ${label.name}` : label.name}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="color"
+                    defaultValue="#4f46e5"
+                    ref={newLabelColorRef}
+                    className="h-9 w-11 cursor-pointer rounded-md border bg-background p-1"
+                  />
+                  <input
+                    type="text"
+                    ref={newLabelNameRef}
+                    placeholder="New label"
+                    className="flex-1 rounded-md border bg-background px-2.5 py-1.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
+                  />
+                  <button
+                    type="button"
+                    aria-label="Add label"
+                    onClick={() => {
+                      const name = newLabelNameRef.current?.value.trim();
+                      if (!name) return;
+                      onCreateLabel(name, newLabelColorRef.current!.value);
+                      newLabelNameRef.current!.value = "";
+                    }}
+                    className="flex cursor-pointer items-center gap-1 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground transition hover:bg-primary-hover"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Add
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+                  <Users className="h-3.5 w-3.5" />
+                  Members
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {assignableMembers
+                .filter((member) => selectedMemberIds.includes(member.userId))
+                .map((member) => {
+                  const isSelf = member.userId === currentUserId;
+                  return (
+                    <button
+                      key={member.userId}
+                      type="button"
+                      title={member.displayName}
+                      onClick={() => toggleMember(member.userId, false)}
+                      className="flex cursor-pointer items-center gap-1.5 rounded-full border-2 border-primary bg-primary-tint py-0.5 pl-0.5 pr-2.5 text-xs font-medium text-primary transition"
+                    >
+                      <span
+                        style={{ backgroundColor: avatarColor(member.displayName) }}
+                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+                      >
+                        {member.displayName.charAt(0).toUpperCase()}
+                      </span>
+                      {isSelf ? "Leave" : `Remove ${member.displayName}`}
+                    </button>
+                  );
+                })}
+              {!selectedMemberIds.includes(currentUserId) && (
+                <button
+                  type="button"
+                  onClick={() => toggleMember(currentUserId, true)}
+                  className="cursor-pointer rounded-full border-2 border-transparent bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground transition hover:bg-border/60"
+                >
+                  Join
+                </button>
+              )}
+            </div>
+
+            <div className="relative">
+              <input
+                type="text"
+                value={memberQuery}
+                onFocus={() => setMemberDropdownOpen(true)}
+                onChange={(event) => {
+                  setMemberQuery(event.target.value);
+                  setMemberDropdownOpen(true);
+                }}
+                onBlur={() => setMemberDropdownOpen(false)}
+                placeholder="Assign to…"
+                className="w-full rounded-md border bg-background px-2.5 py-1.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
+              />
+              {memberDropdownOpen && (
+                <div className="absolute z-10 mt-1 max-h-40 w-full overflow-y-auto rounded-md border bg-card shadow-md">
+                  {unassignedMembers.length > 0 ? (
+                    unassignedMembers.map((member) => (
+                      <button
+                        key={member.userId}
+                        type="button"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => {
+                          toggleMember(member.userId, true);
+                          setMemberQuery("");
+                          setMemberDropdownOpen(false);
+                        }}
+                        className="flex w-full cursor-pointer items-center gap-2 px-2.5 py-1.5 text-left text-sm transition hover:bg-muted"
+                      >
+                        <span
+                          style={{ backgroundColor: avatarColor(member.displayName) }}
+                          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+                        >
+                          {member.displayName.charAt(0).toUpperCase()}
+                        </span>
+                        {member.displayName}
+                      </button>
+                    ))
+                  ) : (
+                    <p className="px-2.5 py-1.5 text-sm text-muted-foreground">No members found</p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+              <ListChecks className="h-3.5 w-3.5" />
+              Checklist
+            </span>
+
+            {draftChecklistItems.length > 0 && (
+              <ul className="flex flex-col gap-1">
+                {draftChecklistItems.map((item) => (
+                  <li key={item.id} className="group/item flex items-center gap-2">
+                    <span className="flex-1 truncate text-sm">{item.title}</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setDraftChecklistItems((prev) => prev.filter((i) => i.id !== item.id))
+                      }
+                      aria-label={`Remove checklist item ${item.title}`}
+                      className="cursor-pointer rounded p-1 text-muted-foreground opacity-0 transition hover:text-destructive group-hover/item:opacity-100"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            <div className="flex gap-2">
+              <input
+                type="text"
+                ref={newChecklistItemRef}
+                placeholder="Add an item"
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    addChecklistItem();
+                  }
+                }}
+                className="flex-1 rounded-md border bg-background px-2.5 py-1.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
+              />
+              <button
+                type="button"
+                onClick={addChecklistItem}
+                className="flex cursor-pointer items-center gap-1 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground transition hover:bg-primary-hover"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Add
+              </button>
+            </div>
+          </div>
+            </>
+          )}
+
+          <div className="flex items-center justify-end gap-2 border-t pt-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="cursor-pointer rounded-md border bg-card px-3.5 py-1.5 text-sm font-medium transition hover:bg-muted"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="cursor-pointer rounded-md bg-primary px-3.5 py-1.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:bg-primary-hover active:scale-[0.98]"
+            >
+              Add card
+            </button>
           </div>
         </form>
       </div>
