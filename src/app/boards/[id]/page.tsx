@@ -1,6 +1,6 @@
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { activities, boardMembers, boards, cardLabels, cardLinks, cardMembers, cards, checklistItems, comments, labels, lists, sprints, users } from "@/db/schema";
+import { activities, boardMembers, boards, cardLabels, cardLinks, cardMembers, cards, checklistItems, labels, lists, sprints, users } from "@/db/schema";
 import { eq, inArray, and, or } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import Link from "next/link";
@@ -65,16 +65,6 @@ export default async function BoardPage({
         where: or(inArray(cardLinks.cardId, cardIds), inArray(cardLinks.linkedCardId, cardIds)),
       })
     : [];
-  const commentRows = cardIds.length
-    ? await db.query.comments.findMany({
-        where: inArray(comments.cardId, cardIds),
-        orderBy: (comment, { desc }) => desc(comment.createdAt),
-      })
-    : [];
-  const commentUserIds = [...new Set(commentRows.map((row) => row.userId))];
-  const commentUsers = commentUserIds.length
-    ? await db.query.users.findMany({ where: inArray(users.id, commentUserIds) })
-    : [];
 
   const initialLists = boardLists.map((list) => ({
     id: list.id,
@@ -100,19 +90,8 @@ export default async function BoardPage({
         checklistItems: checklistItemRows
           .filter((item) => item.cardId === card.id)
           .map((item) => ({ id: item.id, title: item.title, completed: item.completed })),
-        comments: commentRows
-          .filter((row) => row.cardId === card.id)
-          .map((row) => {
-            const user = commentUsers.find((candidate) => candidate.id === row.userId);
-            return {
-              id: row.id,
-              message: row.message,
-              authorId: row.userId,
-              authorName: user ? displayName(user) : "(unknown)",
-              createdAt: row.createdAt,
-              updatedAt: row.updatedAt,
-            };
-          }),
+        // Comments are lazy-loaded via getCardComments when the card modal opens.
+        comments: [],
         links: cardLinkRows
           .filter((row) => row.cardId === card.id || row.linkedCardId === card.id)
           .map((row) => {
@@ -219,6 +198,7 @@ export default async function BoardPage({
       actorName: user ? displayName(user) : "(unknown)",
       createdAt: row.createdAt,
       cardId: row.cardId,
+      scope: row.scope as "global" | "card",
     };
   });
 

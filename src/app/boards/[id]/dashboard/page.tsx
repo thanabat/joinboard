@@ -180,7 +180,8 @@ export default async function DashboardPage({
                 <div>
                   <p className="font-medium">{currentSprint.name}</p>
                   <p className="text-xs text-muted-foreground">
-                    {currentSprint.startDate.toLocaleDateString()} – {currentSprint.endDate.toLocaleDateString()}
+                    {currentSprint.startDate.toLocaleDateString("en-US")} –{" "}
+                    {currentSprint.endDate.toLocaleDateString("en-US")}
                     {currentSprint.status === "active" &&
                       daysRemaining !== null &&
                       ` · ${daysRemaining >= 0 ? `${daysRemaining} days left` : "overdue"}`}
@@ -236,7 +237,7 @@ export default async function DashboardPage({
                     >
                       <span className="font-medium">{sprint.name}</span>
                       <span className="text-xs text-muted-foreground">
-                        {sprint.startDate.toLocaleDateString()} – {sprint.endDate.toLocaleDateString()}
+                        {sprint.startDate.toLocaleDateString("en-US")} – {sprint.endDate.toLocaleDateString("en-US")}
                       </span>
                       <span className="text-xs text-muted-foreground">
                         {done}/{total} done

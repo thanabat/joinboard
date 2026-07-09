@@ -40,9 +40,17 @@ async function requireBoardAdmin(boardId: string) {
   return { board, userId: session.user.id };
 }
 
-async function logActivity(boardId: string, userId: string, cardId: string | null, message: string) {
-  const [activity] = await db.insert(activities).values({ boardId, userId, cardId, message }).returning();
-  return activity;
+type ActivityScope = "global" | "card";
+
+async function logActivity(
+  boardId: string,
+  userId: string,
+  cardId: string | null,
+  message: string,
+  scope: ActivityScope,
+) {
+  const [activity] = await db.insert(activities).values({ boardId, userId, cardId, message, scope }).returning();
+  return { ...activity, scope: activity.scope as ActivityScope };
 }
 
 export async function createList(boardId: string, title: string) {
@@ -61,7 +69,7 @@ export async function createList(boardId: string, title: string) {
     .values({ boardId, title: trimmed, position: (maxPosition ?? 0) + 1 })
     .returning();
 
-  const activity = await logActivity(boardId, userId, null, `created list "${trimmed}"`);
+  const activity = await logActivity(boardId, userId, null, `created list "${trimmed}"`, "global");
   revalidatePath(`/boards/${boardId}`);
   return { list, activity };
 }
@@ -122,6 +130,7 @@ export async function createCard(
     userId,
     card.id,
     `created card "${trimmed}" in list "${list.title}"`,
+    "global",
   );
   revalidatePath(`/boards/${list.boardId}`);
   return { card, activity };
@@ -139,6 +148,7 @@ export async function updateList(listId: string, title: string) {
     userId,
     null,
     `renamed list "${list.title}" to "${trimmed}"`,
+    "global",
   );
   revalidatePath(`/boards/${board.id}`);
   return { activity };
@@ -149,7 +159,7 @@ export async function deleteList(listId: string) {
 
   // Cascades to the list's cards via the cards.listId foreign key.
   await db.delete(lists).where(eq(lists.id, listId));
-  const activity = await logActivity(board.id, userId, null, `deleted list "${list.title}"`);
+  const activity = await logActivity(board.id, userId, null, `deleted list "${list.title}"`, "global");
   revalidatePath(`/boards/${board.id}`);
   return { activity };
 }
@@ -183,7 +193,7 @@ export async function updateCard(
 
   const message =
     card.title !== trimmed ? `renamed card "${card.title}" to "${trimmed}"` : `updated card "${trimmed}"`;
-  const activity = await logActivity(board.id, userId, cardId, message);
+  const activity = await logActivity(board.id, userId, cardId, message, "card");
   revalidatePath(`/boards/${board.id}`);
   return { activity };
 }
@@ -192,7 +202,8 @@ export async function deleteCard(cardId: string) {
   const { card, board, userId } = await requireCardAccess(cardId);
 
   await db.delete(cards).where(eq(cards.id, cardId));
-  const activity = await logActivity(board.id, userId, null, `deleted card "${card.title}"`);
+  // No card left to scope this to, so it can only ever show on the board's global feed.
+  const activity = await logActivity(board.id, userId, null, `deleted card "${card.title}"`, "global");
   revalidatePath(`/boards/${board.id}`);
   return { activity };
 }
@@ -220,6 +231,7 @@ export async function moveCard(cardId: string, targetListId: string) {
           userId,
           cardId,
           `moved card "${card.title}" from "${currentList.title}" to "${targetList.title}"`,
+          "global",
         )
       : undefined;
   revalidatePath(`/boards/${board.id}`);
@@ -253,12 +265,14 @@ export async function moveCardToBoard(cardId: string, targetListId: string) {
     userId,
     null,
     `moved card "${card.title}" to board "${targetBoard.name}"`,
+    "global",
   );
   await logActivity(
     targetBoard.id,
     userId,
     cardId,
     `card "${card.title}" moved here from board "${sourceBoard.name}" into list "${targetList.title}"`,
+    "global",
   );
 
   revalidatePath(`/boards/${sourceBoard.id}`);
@@ -284,6 +298,7 @@ export async function setCardType(cardId: string, type: string) {
     userId,
     cardId,
     `changed card "${card.title}" type to "${CARD_TYPE_LABELS[type as (typeof CARD_TYPES)[number]]}"`,
+    "card",
   );
   revalidatePath(`/boards/${board.id}`);
   return { activity };
@@ -308,6 +323,7 @@ export async function setCardPriority(cardId: string, priority: string) {
     userId,
     cardId,
     `changed card "${card.title}" priority to "${CARD_PRIORITY_LABELS[priority as (typeof CARD_PRIORITIES)[number]]}"`,
+    "card",
   );
   revalidatePath(`/boards/${board.id}`);
   return { activity };
@@ -351,6 +367,7 @@ export async function linkCards(cardId: string, targetCardId: string, relation: 
     userId,
     cardId,
     `linked card "${card.title}" to "${targetCard.title}" (${LINK_RELATION_LABELS[relation as (typeof LINK_RELATIONS)[number]]})`,
+    "card",
   );
   revalidatePath(`/boards/${board.id}`);
   return { link, activity };
@@ -367,8 +384,9 @@ export async function unlinkCards(linkId: string) {
   const activity = await logActivity(
     board.id,
     userId,
-    null,
+    link.cardId,
     `removed link between "${card.title}" and "${otherCard?.title ?? "a card"}"`,
+    "card",
   );
   revalidatePath(`/boards/${board.id}`);
   return { activity };
@@ -382,7 +400,7 @@ export async function createLabel(boardId: string, name: string, color: string) 
 
   const [label] = await db.insert(labels).values({ boardId, name: trimmed, color }).returning();
 
-  const activity = await logActivity(boardId, userId, null, `created label "${trimmed}"`);
+  const activity = await logActivity(boardId, userId, null, `created label "${trimmed}"`, "global");
   revalidatePath(`/boards/${boardId}`);
   return { label, activity };
 }
@@ -394,7 +412,7 @@ export async function deleteLabel(labelId: string) {
 
   // Cascades to cardLabels via the cardLabel.labelId foreign key.
   await db.delete(labels).where(eq(labels.id, labelId));
-  const activity = await logActivity(board.id, userId, null, `deleted label "${label.name}"`);
+  const activity = await logActivity(board.id, userId, null, `deleted label "${label.name}"`, "global");
   revalidatePath(`/boards/${board.id}`);
   return { activity };
 }
@@ -418,6 +436,7 @@ export async function setCardLabel(cardId: string, labelId: string, assigned: bo
     userId,
     cardId,
     `${assigned ? "added" : "removed"} label "${label.name}" ${assigned ? "to" : "from"} card "${card.title}"`,
+    "card",
   );
   revalidatePath(`/boards/${list.boardId}`);
   return { activity };
@@ -454,7 +473,7 @@ export async function setCardMember(cardId: string, userId: string, assigned: bo
       : `${assigned ? "assigned" : "unassigned"} ${targetUser ? displayName(targetUser) : "a member"} ${
           assigned ? "to" : "from"
         } card "${card.title}"`;
-  const activity = await logActivity(list.boardId, actorId, cardId, message);
+  const activity = await logActivity(list.boardId, actorId, cardId, message, "card");
   revalidatePath(`/boards/${list.boardId}`);
   return { activity };
 }
@@ -480,6 +499,7 @@ export async function createChecklistItem(cardId: string, title: string) {
     userId,
     cardId,
     `added checklist item "${trimmed}" to card "${card.title}"`,
+    "card",
   );
   revalidatePath(`/boards/${list.boardId}`);
   return { item, activity };
@@ -508,6 +528,7 @@ export async function toggleChecklistItem(itemId: string, completed: boolean) {
     userId,
     item.cardId,
     `${completed ? "completed" : "reopened"} checklist item "${item.title}" on card "${card.title}"`,
+    "card",
   );
   revalidatePath(`/boards/${list.boardId}`);
   return { activity };
@@ -524,6 +545,7 @@ export async function deleteChecklistItem(itemId: string) {
     userId,
     item.cardId,
     `removed checklist item "${item.title}" from card "${card.title}"`,
+    "card",
   );
   revalidatePath(`/boards/${list.boardId}`);
   return { activity };
@@ -591,6 +613,7 @@ export async function reorderCards(
       userId,
       moved.card.id,
       `moved card "${moved.card.title}" from "${sourceList?.title ?? "another list"}" to "${targetList?.title ?? "another list"}"`,
+      "global",
     );
   }
 
@@ -625,7 +648,7 @@ export async function inviteMember(boardId: string, email: string) {
       set: { status: "invited" },
     });
 
-  const activity = await logActivity(boardId, actorId, null, `invited ${trimmedEmail} to the board`);
+  const activity = await logActivity(boardId, actorId, null, `invited ${trimmedEmail} to the board`, "global");
   revalidatePath(`/boards/${boardId}`);
   revalidatePath("/boards");
   return {
@@ -651,6 +674,7 @@ export async function removeMember(boardId: string, userId: string) {
     actorId,
     null,
     `removed ${target ? displayName(target) : "a member"} from the board`,
+    "global",
   );
   revalidatePath(`/boards/${boardId}`);
   return { activity };
@@ -674,6 +698,7 @@ export async function blockMember(boardId: string, userId: string) {
     actorId,
     null,
     `blocked ${target ? displayName(target) : "a member"}`,
+    "global",
   );
   revalidatePath(`/boards/${boardId}`);
   return { activity };
@@ -694,6 +719,7 @@ export async function unblockMember(boardId: string, userId: string) {
     actorId,
     null,
     `unblocked ${target ? displayName(target) : "a member"}`,
+    "global",
   );
   revalidatePath(`/boards/${boardId}`);
   return { activity };
@@ -714,7 +740,7 @@ export async function acceptInvite(boardId: string) {
       ),
     );
 
-  await logActivity(boardId, session.user.id, null, "joined the board");
+  await logActivity(boardId, session.user.id, null, "joined the board", "global");
   revalidatePath("/boards");
 }
 
@@ -744,7 +770,7 @@ export async function generateInviteLink(boardId: string) {
   const token = crypto.randomUUID();
   await db.update(boards).set({ inviteToken: token }).where(eq(boards.id, boardId));
 
-  const activity = await logActivity(boardId, userId, null, "created an invite link");
+  const activity = await logActivity(boardId, userId, null, "created an invite link", "global");
   revalidatePath(`/boards/${boardId}`);
   return { token, activity };
 }
@@ -754,7 +780,7 @@ export async function revokeInviteLink(boardId: string) {
 
   await db.update(boards).set({ inviteToken: null }).where(eq(boards.id, boardId));
 
-  const activity = await logActivity(boardId, userId, null, "revoked the invite link");
+  const activity = await logActivity(boardId, userId, null, "revoked the invite link", "global");
   revalidatePath(`/boards/${boardId}`);
   return { activity };
 }
@@ -777,7 +803,7 @@ export async function createSprint(boardId: string, name: string, startDate: str
     .values({ boardId, name: trimmed, startDate: new Date(startDate), endDate: new Date(endDate) })
     .returning();
 
-  const activity = await logActivity(boardId, userId, null, `created sprint "${trimmed}"`);
+  const activity = await logActivity(boardId, userId, null, `created sprint "${trimmed}"`, "global");
   revalidatePath(`/boards/${boardId}/dashboard`);
   return { sprint, activity };
 }
@@ -790,7 +816,7 @@ export async function startSprint(sprintId: string) {
 
   await db.update(sprints).set({ status: "active" }).where(eq(sprints.id, sprintId));
 
-  const activity = await logActivity(sprint.boardId, userId, null, `started sprint "${sprint.name}"`);
+  const activity = await logActivity(sprint.boardId, userId, null, `started sprint "${sprint.name}"`, "global");
   revalidatePath(`/boards/${sprint.boardId}/dashboard`);
   return { activity };
 }
@@ -802,7 +828,7 @@ export async function completeSprint(sprintId: string) {
 
   await db.update(sprints).set({ status: "completed" }).where(eq(sprints.id, sprintId));
 
-  const activity = await logActivity(sprint.boardId, userId, null, `completed sprint "${sprint.name}"`);
+  const activity = await logActivity(sprint.boardId, userId, null, `completed sprint "${sprint.name}"`, "global");
   revalidatePath(`/boards/${sprint.boardId}/dashboard`);
   return { activity };
 }
@@ -820,7 +846,7 @@ export async function setCardSprint(cardId: string, sprintId: string | null) {
   const message = sprintId
     ? `added card "${card.title}" to the sprint`
     : `removed card "${card.title}" from the sprint`;
-  const activity = await logActivity(list.boardId, userId, cardId, message);
+  const activity = await logActivity(list.boardId, userId, cardId, message, "card");
   revalidatePath(`/boards/${list.boardId}`);
   return { activity };
 }
@@ -841,12 +867,39 @@ export async function setListDone(listId: string, isDone: boolean) {
     userId,
     null,
     isDone ? `marked list "${list.title}" as the Done list` : `unmarked list "${list.title}" as the Done list`,
+    "global",
   );
   revalidatePath(`/boards/${board.id}`);
   return { activity };
 }
 
-// --- Comments ---
+// --- Comments (loaded lazily — see getCardComments) ---
+
+export async function getCardComments(cardId: string) {
+  await requireCardAccess(cardId);
+
+  const rows = await db.query.comments.findMany({
+    where: eq(comments.cardId, cardId),
+    orderBy: (comment, { desc }) => desc(comment.createdAt),
+  });
+
+  const userIds = [...new Set(rows.map((row) => row.userId))];
+  const commentUsers = userIds.length
+    ? await db.query.users.findMany({ where: inArray(users.id, userIds) })
+    : [];
+
+  return rows.map((row) => {
+    const user = commentUsers.find((candidate) => candidate.id === row.userId);
+    return {
+      id: row.id,
+      message: row.message,
+      authorId: row.userId,
+      authorName: user ? displayName(user) : "(unknown)",
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  });
+}
 
 export async function createComment(cardId: string, message: string) {
   const { card, list, userId } = await requireCardAccess(cardId);
@@ -856,7 +909,7 @@ export async function createComment(cardId: string, message: string) {
 
   const [comment] = await db.insert(comments).values({ cardId, userId, message: trimmed }).returning();
 
-  const activity = await logActivity(list.boardId, userId, cardId, `commented on card "${card.title}"`);
+  const activity = await logActivity(list.boardId, userId, cardId, `commented on card "${card.title}"`, "card");
   revalidatePath(`/boards/${list.boardId}`);
   return { comment, activity };
 }

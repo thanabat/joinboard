@@ -63,6 +63,7 @@ import {
   deleteLabel,
   deleteList,
   generateInviteLink,
+  getCardComments,
   inviteMember,
   linkCards,
   moveCard,
@@ -163,7 +164,14 @@ type CardCreateDetails = {
 };
 type Member = { userId: string; email: string; displayName: string; status: string };
 type AssignableMember = { userId: string; email: string; displayName: string };
-type Activity = { id: string; message: string; actorName: string; createdAt: Date; cardId: string | null };
+type Activity = {
+  id: string;
+  message: string;
+  actorName: string;
+  createdAt: Date;
+  cardId: string | null;
+  scope: "global" | "card";
+};
 
 // Hoisted so this object's identity is stable across renders — passing a
 // fresh literal here every render defeats dnd-kit's sensor memoization and
@@ -196,12 +204,12 @@ function timeAgo(date: Date) {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   if (days < 7) return `${days}d ago`;
-  return date.toLocaleDateString();
+  return date.toLocaleDateString("en-US");
 }
 
 function sprintCountdown(sprint: CurrentSprint) {
   if (sprint.status === "planned") {
-    return { text: `Starts ${sprint.startDate.toLocaleDateString()}`, urgent: false };
+    return { text: `Starts ${sprint.startDate.toLocaleDateString("en-US")}`, urgent: false };
   }
   const days = Math.ceil((sprint.endDate.getTime() - Date.now()) / (24 * 60 * 60 * 1000));
   if (days < 0) return { text: `Overdue by ${Math.abs(days)}d`, urgent: true };
@@ -395,6 +403,7 @@ export function Board({
   const showLabelTextKey = `joinboard:showLabelText:${boardId}`;
   const [editingListId, setEditingListId] = useState<string | null>(null);
   const [detailCardId, setDetailCardId] = useState<string | null>(null);
+  const [loadedCommentsCardId, setLoadedCommentsCardId] = useState<string | null>(null);
   const [creatingCardListId, setCreatingCardListId] = useState<string | null>(null);
   const [movingCardId, setMovingCardId] = useState<string | null>(null);
   const [showMembers, setShowMembers] = useState(false);
@@ -416,6 +425,24 @@ export function Board({
     if (stored !== null) setShowLabelText(stored === "true");
   }, [showLabelTextKey]);
 
+  useEffect(() => {
+    if (!detailCardId) return;
+    let cancelled = false;
+    getCardComments(detailCardId).then((comments) => {
+      if (cancelled) return;
+      setLists((prev) =>
+        prev.map((list) => ({
+          ...list,
+          cards: list.cards.map((card) => (card.id === detailCardId ? { ...card, comments } : card)),
+        })),
+      );
+      setLoadedCommentsCardId(detailCardId);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [detailCardId]);
+
   function handleToggleLabelText() {
     setShowLabelText((prev) => {
       const next = !prev;
@@ -425,14 +452,23 @@ export function Board({
   }
 
   function pushActivity(
-    activity: { id: string; message: string; createdAt: Date; cardId: string | null } | undefined,
+    activity:
+      | { id: string; message: string; createdAt: Date; cardId: string | null; scope: "global" | "card" }
+      | undefined,
   ) {
     if (!activity) return;
     const actorName =
       assignableMembers.find((member) => member.userId === currentUserId)?.displayName ?? "Someone";
     setActivities((prev) =>
       [
-        { id: activity.id, message: activity.message, actorName, createdAt: activity.createdAt, cardId: activity.cardId },
+        {
+          id: activity.id,
+          message: activity.message,
+          actorName,
+          createdAt: activity.createdAt,
+          cardId: activity.cardId,
+          scope: activity.scope,
+        },
         ...prev,
       ].slice(0, MAX_ACTIVITIES),
     );
@@ -1039,6 +1075,7 @@ export function Board({
     list.cards.some((card) => card.id === detailCardId),
   )?.id;
   const movingCard = lists.flatMap((list) => list.cards).find((card) => card.id === movingCardId);
+  const commentsLoading = detailCardId !== null && loadedCommentsCardId !== detailCardId;
 
   const doneList = lists.find((list) => list.isDoneList);
   const sprintCards = currentSprint
@@ -1428,6 +1465,7 @@ export function Board({
               onUnlinkCard={handleUnlinkCard}
               onNavigateToCard={setDetailCardId}
               activities={activities}
+              commentsLoading={commentsLoading}
               onAddComment={handleAddComment}
               onUpdateComment={handleUpdateComment}
               onDeleteComment={handleDeleteComment}
@@ -1476,7 +1514,7 @@ export function Board({
         )}
       </div>
       <ActivitySidebar
-        activities={activities}
+        activities={activities.filter((activity) => activity.scope === "global")}
         collapsed={activityCollapsed}
         onToggleCollapsed={() => setActivityCollapsed((prev) => !prev)}
       />
@@ -1776,7 +1814,7 @@ function SortableCard({
         {card.dueDate && (
           <span className="flex items-center gap-1 text-xs text-muted-foreground">
             <Calendar className="h-3 w-3 shrink-0" />
-            {card.dueDate.toLocaleDateString()}
+            {card.dueDate.toLocaleDateString("en-US")}
           </span>
         )}
         {card.checklistItems.length > 0 && (
@@ -1843,6 +1881,7 @@ function CardDetailModal({
   onUnlinkCard,
   onNavigateToCard,
   activities,
+  commentsLoading,
   onAddComment,
   onUpdateComment,
   onDeleteComment,
@@ -1873,6 +1912,7 @@ function CardDetailModal({
   onUnlinkCard: (linkId: string) => void;
   onNavigateToCard: (cardId: string) => void;
   activities: Activity[];
+  commentsLoading: boolean;
   onAddComment: (cardId: string, message: string) => void;
   onUpdateComment: (commentId: string, message: string) => void;
   onDeleteComment: (commentId: string) => void;
@@ -2693,7 +2733,9 @@ function CardDetailModal({
             </button>
           </form>
 
-          {feedItems.length === 0 ? (
+          {commentsLoading && <p className="text-sm text-muted-foreground">Loading comments…</p>}
+
+          {!commentsLoading && feedItems.length === 0 ? (
             <p className="text-sm text-muted-foreground">No comments or activity yet.</p>
           ) : (
             <ul className="flex flex-col gap-3">

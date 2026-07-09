@@ -234,5 +234,7 @@ export const activities = pgTable("activity", {
   // message) survives even after the card it refers to is deleted.
   cardId: text("cardId").references(() => cards.id, { onDelete: "set null" }),
   message: text("message").notNull(),
+  // "global" (board-wide sidebar) | "card" (that card's activity tab only).
+  scope: text("scope").notNull().default("card"),
   createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
 });
