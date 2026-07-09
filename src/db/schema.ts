@@ -141,6 +141,10 @@ export const cards = pgTable("card", {
   dueDate: timestamp("dueDate", { mode: "date" }),
   // "task" | "backlog_item" — fixed set of card types, similar to Azure DevOps work item types.
   type: text("type").notNull().default("task"),
+  // "high" | "medium" | "low" — priority levels.
+  priority: text("priority").notNull().default("medium"),
+  // Null means unestimated.
+  storyPoints: integer("storyPoints"),
   sprintId: text("sprintId").references(() => sprints.id, { onDelete: "set null" }),
   createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
 });

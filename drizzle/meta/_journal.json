@@ -71,6 +71,20 @@
       "when": 1783579374501,
       "tag": "0009_jazzy_shooting_star",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1783587596167,
+      "tag": "0010_fearless_hawkeye",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1783588251784,
+      "tag": "0011_mighty_killer_shrike",
+      "breakpoints": true
     }
   ]
 }

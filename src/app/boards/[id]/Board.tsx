@@ -19,7 +19,9 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import {
   AlignLeft,
+  ArrowDown,
   ArrowRightLeft,
+  ArrowUp,
   Bookmark,
   Calendar,
   Check,
@@ -29,7 +31,9 @@ import {
   ChevronRight,
   ChevronUp,
   Copy,
+  Equal,
   GripVertical,
+  Hash,
   History,
   Link2,
   ListChecks,
@@ -67,6 +71,7 @@ import {
   revokeInviteLink,
   setCardLabel,
   setCardMember,
+  setCardPriority,
   setCardSprint,
   setCardType,
   setListDone,
@@ -81,6 +86,7 @@ import {
 type Label = { id: string; name: string; color: string };
 type ChecklistItem = { id: string; title: string; completed: boolean };
 type CardType = "task" | "backlog_item";
+type CardPriority = "high" | "medium" | "low";
 type LinkRelation = "blocks" | "is_blocked_by" | "relates_to";
 type CardLink = { id: string; relation: LinkRelation; otherCardId: string };
 type CardItem = {
@@ -92,6 +98,8 @@ type CardItem = {
   memberIds: string[];
   checklistItems: ChecklistItem[];
   type: CardType;
+  priority: CardPriority;
+  storyPoints: number | null;
   links: CardLink[];
   sprintId: string | null;
 };
@@ -99,6 +107,12 @@ type CardItem = {
 const CARD_TYPES: Record<CardType, { label: string; icon: typeof SquareCheck; color: string }> = {
   task: { label: "Task", icon: SquareCheck, color: "#4f46e5" },
   backlog_item: { label: "Product Backlog Item", icon: Bookmark, color: "#d97706" },
+};
+
+const CARD_PRIORITIES: Record<CardPriority, { label: string; icon: typeof SquareCheck; color: string }> = {
+  high: { label: "High", icon: ArrowUp, color: "#f97316" },
+  medium: { label: "Medium", icon: Equal, color: "#ca8a04" },
+  low: { label: "Low", icon: ArrowDown, color: "#3b82f6" },
 };
 
 const LINK_RELATION_LABELS: Record<LinkRelation, string> = {
@@ -115,12 +129,19 @@ type CurrentSprint = {
   endDate: Date;
 };
 type OtherBoard = { id: string; name: string; lists: { id: string; title: string }[] };
-type CardUpdates = { title: string; description: string | null; dueDate: string | null };
+type CardUpdates = {
+  title: string;
+  description: string | null;
+  dueDate: string | null;
+  storyPoints: number | null;
+};
 type CardCreateDetails = {
   title: string;
   description: string | null;
   dueDate: string | null;
   type: CardType;
+  priority: CardPriority;
+  storyPoints: number | null;
   labelIds: string[];
   memberIds: string[];
   checklistItemTitles: string[];
@@ -468,6 +489,8 @@ export function Board({
       description: details.description,
       dueDate: details.dueDate,
       type: details.type,
+      priority: details.priority,
+      storyPoints: details.storyPoints,
     });
     pushActivity(activity);
 
@@ -505,6 +528,8 @@ export function Board({
                   memberIds: details.memberIds,
                   checklistItems,
                   type: card.type as CardType,
+                  priority: card.priority as CardPriority,
+                  storyPoints: card.storyPoints,
                   links: [],
                   sprintId: null,
                 },
@@ -604,6 +629,17 @@ export function Board({
       })),
     );
     const { activity } = await setCardType(cardId, type);
+    pushActivity(activity);
+  }
+
+  async function handleSetCardPriority(cardId: string, priority: CardPriority) {
+    setLists((prev) =>
+      prev.map((list) => ({
+        ...list,
+        cards: list.cards.map((card) => (card.id === cardId ? { ...card, priority } : card)),
+      })),
+    );
+    const { activity } = await setCardPriority(cardId, priority);
     pushActivity(activity);
   }
 
@@ -1027,6 +1063,7 @@ export function Board({
               onToggleChecklistItem={handleToggleChecklistItem}
               onDeleteChecklistItem={handleDeleteChecklistItem}
               onSetType={handleSetCardType}
+              onSetPriority={handleSetCardPriority}
               currentSprint={currentSprint}
               onSetSprint={handleSetCardSprint}
               onLinkCard={handleLinkCard}
@@ -1268,6 +1305,8 @@ function SortableCard({
   const cardMembers = assignableMembers.filter((member) => card.memberIds.includes(member.userId));
   const cardType = CARD_TYPES[card.type];
   const CardTypeIcon = cardType.icon;
+  const cardPriority = CARD_PRIORITIES[card.priority];
+  const CardPriorityIcon = cardPriority.icon;
 
   return (
     <li
@@ -1279,7 +1318,14 @@ function SortableCard({
         isDragging ? "opacity-60 shadow-md" : ""
       }`}
     >
-      <div className="mb-1.5">
+      <div className="mb-1.5 flex items-center gap-1">
+        <span
+          title={`Priority: ${cardPriority.label}`}
+          className="inline-flex shrink-0 items-center rounded p-0.5"
+          style={{ color: cardPriority.color, backgroundColor: `${cardPriority.color}1a` }}
+        >
+          <CardPriorityIcon className="h-3 w-3" />
+        </span>
         <span
           className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium"
           style={{ color: cardType.color, backgroundColor: `${cardType.color}1a` }}
@@ -1287,6 +1333,15 @@ function SortableCard({
           <CardTypeIcon className="h-3 w-3" />
           {cardType.label}
         </span>
+        {card.storyPoints !== null && (
+          <span
+            title={`${card.storyPoints} story point${card.storyPoints === 1 ? "" : "s"}`}
+            className="inline-flex shrink-0 items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground"
+          >
+            <Hash className="h-3 w-3" />
+            {card.storyPoints}
+          </span>
+        )}
         {currentSprint && card.sprintId === currentSprint.id && (
           <span className="ml-1 inline-flex items-center gap-1 rounded bg-primary-tint px-1.5 py-0.5 text-[11px] font-medium text-primary">
             <Rocket className="h-3 w-3" />
@@ -1419,6 +1474,7 @@ function CardDetailModal({
   onToggleChecklistItem,
   onDeleteChecklistItem,
   onSetType,
+  onSetPriority,
   currentSprint,
   onSetSprint,
   onLinkCard,
@@ -1444,6 +1500,7 @@ function CardDetailModal({
   onToggleChecklistItem: (cardId: string, itemId: string, completed: boolean) => void;
   onDeleteChecklistItem: (cardId: string, itemId: string) => void;
   onSetType: (cardId: string, type: CardType) => void;
+  onSetPriority: (cardId: string, priority: CardPriority) => void;
   currentSprint: CurrentSprint | null;
   onSetSprint: (cardId: string, sprintId: string | null) => void;
   onLinkCard: (cardId: string, targetCardId: string, relation: LinkRelation) => void;
@@ -1513,7 +1570,13 @@ function CardDetailModal({
             const title = (form.elements.namedItem("title") as HTMLInputElement).value;
             const description = (form.elements.namedItem("description") as HTMLTextAreaElement).value;
             const dueDate = (form.elements.namedItem("dueDate") as HTMLInputElement).value;
-            onSave(card.id, { title, description: description || null, dueDate: dueDate || null });
+            const storyPoints = (form.elements.namedItem("storyPoints") as HTMLInputElement).value;
+            onSave(card.id, {
+              title,
+              description: description || null,
+              dueDate: dueDate || null,
+              storyPoints: storyPoints === "" ? null : Number(storyPoints),
+            });
           }}
           className="flex flex-col gap-4"
         >
@@ -1562,6 +1625,38 @@ function CardDetailModal({
                       }
                     >
                       <TypeIcon className="h-3.5 w-3.5" />
+                      {config.label}
+                    </button>
+                  );
+                },
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <span className="text-sm font-medium text-muted-foreground">Priority</span>
+            <div className="flex flex-wrap gap-1.5">
+              {(Object.entries(CARD_PRIORITIES) as [CardPriority, (typeof CARD_PRIORITIES)[CardPriority]][]).map(
+                ([value, config]) => {
+                  const selected = card.priority === value;
+                  const PriorityIcon = config.icon;
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => onSetPriority(card.id, value)}
+                      style={
+                        selected
+                          ? { backgroundColor: config.color, borderColor: config.color }
+                          : { borderColor: config.color, color: config.color }
+                      }
+                      className={
+                        selected
+                          ? "flex cursor-pointer items-center gap-1.5 rounded-full border-2 px-2.5 py-1 text-left text-xs font-medium text-white transition"
+                          : "flex cursor-pointer items-center gap-1.5 rounded-full border-2 bg-transparent px-2.5 py-1 text-left text-xs font-medium transition"
+                      }
+                    >
+                      <PriorityIcon className="h-3.5 w-3.5" />
                       {config.label}
                     </button>
                   );
@@ -1623,6 +1718,22 @@ function CardDetailModal({
                   </option>
                 ))}
               </select>
+            </label>
+
+            <label className="flex flex-col gap-1.5 text-sm font-medium text-muted-foreground">
+              <span className="flex items-center gap-1.5">
+                <Hash className="h-3.5 w-3.5" />
+                Story points
+              </span>
+              <input
+                name="storyPoints"
+                type="number"
+                min={0}
+                step={1}
+                defaultValue={card.storyPoints ?? ""}
+                placeholder="Unestimated"
+                className="rounded-md border bg-background px-2.5 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
+              />
             </label>
           </div>
 
@@ -2064,6 +2175,7 @@ function CreateCardModal({
   onCreateLabel: (name: string, color: string) => void;
 }) {
   const [type, setType] = useState<CardType>("task");
+  const [priority, setPriority] = useState<CardPriority>("medium");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>([]);
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
@@ -2123,12 +2235,15 @@ function CreateCardModal({
             const title = (form.elements.namedItem("title") as HTMLInputElement).value;
             const description = (form.elements.namedItem("description") as HTMLTextAreaElement).value;
             const dueDate = (form.elements.namedItem("dueDate") as HTMLInputElement).value;
+            const storyPoints = (form.elements.namedItem("storyPoints") as HTMLInputElement).value;
             if (!title.trim()) return;
             onCreate({
               title,
               description: description || null,
               dueDate: dueDate || null,
               type,
+              priority,
+              storyPoints: storyPoints === "" ? null : Number(storyPoints),
               labelIds: selectedLabelIds,
               memberIds: selectedMemberIds,
               checklistItemTitles: draftChecklistItems.map((item) => item.title),
@@ -2191,17 +2306,66 @@ function CreateCardModal({
             </div>
           </div>
 
-          <label className="flex flex-col gap-1.5 text-sm font-medium text-muted-foreground">
-            <span className="flex items-center gap-1.5">
-              <Calendar className="h-3.5 w-3.5" />
-              Due date
-            </span>
-            <input
-              name="dueDate"
-              type="date"
-              className="rounded-md border bg-background px-2.5 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
-            />
-          </label>
+          <div className="flex flex-col gap-1.5">
+            <span className="text-sm font-medium text-muted-foreground">Priority</span>
+            <div className="flex flex-wrap gap-1.5">
+              {(Object.entries(CARD_PRIORITIES) as [CardPriority, (typeof CARD_PRIORITIES)[CardPriority]][]).map(
+                ([value, config]) => {
+                  const selected = priority === value;
+                  const PriorityIcon = config.icon;
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setPriority(value)}
+                      style={
+                        selected
+                          ? { backgroundColor: config.color, borderColor: config.color }
+                          : { borderColor: config.color, color: config.color }
+                      }
+                      className={
+                        selected
+                          ? "flex cursor-pointer items-center gap-1.5 rounded-full border-2 px-2.5 py-1 text-left text-xs font-medium text-white transition"
+                          : "flex cursor-pointer items-center gap-1.5 rounded-full border-2 bg-transparent px-2.5 py-1 text-left text-xs font-medium transition"
+                      }
+                    >
+                      <PriorityIcon className="h-3.5 w-3.5" />
+                      {config.label}
+                    </button>
+                  );
+                },
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex flex-col gap-1.5 text-sm font-medium text-muted-foreground">
+              <span className="flex items-center gap-1.5">
+                <Calendar className="h-3.5 w-3.5" />
+                Due date
+              </span>
+              <input
+                name="dueDate"
+                type="date"
+                className="rounded-md border bg-background px-2.5 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
+              />
+            </label>
+
+            <label className="flex flex-col gap-1.5 text-sm font-medium text-muted-foreground">
+              <span className="flex items-center gap-1.5">
+                <Hash className="h-3.5 w-3.5" />
+                Story points
+              </span>
+              <input
+                name="storyPoints"
+                type="number"
+                min={0}
+                step={1}
+                placeholder="Unestimated"
+                className="rounded-md border bg-background px-2.5 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
+              />
+            </label>
+          </div>
 
           <button
             type="button"

@@ -78,6 +78,8 @@ export default async function BoardPage({
         description: card.description,
         dueDate: card.dueDate,
         type: card.type as "task" | "backlog_item",
+        priority: card.priority as "high" | "medium" | "low",
+        storyPoints: card.storyPoints,
         sprintId: card.sprintId,
         labelIds: cardLabelRows
           .filter((row) => row.cardId === card.id)

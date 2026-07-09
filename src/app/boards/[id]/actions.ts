@@ -82,7 +82,14 @@ async function requireCardAccess(cardId: string) {
 
 export async function createCard(
   listId: string,
-  details: { title: string; description: string | null; dueDate: string | null; type: string },
+  details: {
+    title: string;
+    description: string | null;
+    dueDate: string | null;
+    type: string;
+    priority: string;
+    storyPoints: number | null;
+  },
 ) {
   const list = await db.query.lists.findFirst({ where: eq(lists.id, listId) });
   if (!list) throw new Error("List not found");
@@ -104,6 +111,8 @@ export async function createCard(
       description: details.description?.trim() || null,
       dueDate: details.dueDate ? new Date(details.dueDate) : null,
       type: details.type,
+      priority: details.priority,
+      storyPoints: details.storyPoints,
       position: (maxPosition ?? 0) + 1,
     })
     .returning();
@@ -147,12 +156,20 @@ export async function deleteList(listId: string) {
 
 export async function updateCard(
   cardId: string,
-  updates: { title: string; description: string | null; dueDate: string | null },
+  updates: {
+    title: string;
+    description: string | null;
+    dueDate: string | null;
+    storyPoints: number | null;
+  },
 ) {
   const { card, board, userId } = await requireCardAccess(cardId);
 
   const trimmed = updates.title.trim();
   if (!trimmed) throw new Error("Title is required");
+  if (updates.storyPoints !== null && (!Number.isInteger(updates.storyPoints) || updates.storyPoints < 0)) {
+    throw new Error("Story points must be a non-negative whole number");
+  }
 
   await db
     .update(cards)
@@ -160,6 +177,7 @@ export async function updateCard(
       title: trimmed,
       description: updates.description?.trim() || null,
       dueDate: updates.dueDate ? new Date(updates.dueDate) : null,
+      storyPoints: updates.storyPoints,
     })
     .where(eq(cards.id, cardId));
 
@@ -266,6 +284,30 @@ export async function setCardType(cardId: string, type: string) {
     userId,
     cardId,
     `changed card "${card.title}" type to "${CARD_TYPE_LABELS[type as (typeof CARD_TYPES)[number]]}"`,
+  );
+  revalidatePath(`/boards/${board.id}`);
+  return { activity };
+}
+
+const CARD_PRIORITIES = ["high", "medium", "low"] as const;
+const CARD_PRIORITY_LABELS: Record<(typeof CARD_PRIORITIES)[number], string> = {
+  high: "High",
+  medium: "Medium",
+  low: "Low",
+};
+
+export async function setCardPriority(cardId: string, priority: string) {
+  const { card, board, userId } = await requireCardAccess(cardId);
+  if (!CARD_PRIORITIES.includes(priority as (typeof CARD_PRIORITIES)[number])) {
+    throw new Error("Invalid priority");
+  }
+
+  await db.update(cards).set({ priority }).where(eq(cards.id, cardId));
+  const activity = await logActivity(
+    board.id,
+    userId,
+    cardId,
+    `changed card "${card.title}" priority to "${CARD_PRIORITY_LABELS[priority as (typeof CARD_PRIORITIES)[number]]}"`,
   );
   revalidatePath(`/boards/${board.id}`);
   return { activity };
