@@ -3,7 +3,7 @@
 import { auth } from "@/auth";
 import { db } from "@/db";
 import { activities, boardMembers, boards, cardLabels, cardLinks, cardMembers, cards, checklistItems, labels, lists, sprints, users } from "@/db/schema";
-import { and, eq, inArray, max } from "drizzle-orm";
+import { and, eq, inArray, max, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { displayName } from "@/lib/displayName";
 
@@ -205,6 +205,46 @@ export async function moveCard(cardId: string, targetListId: string) {
         )
       : undefined;
   revalidatePath(`/boards/${board.id}`);
+  return { activity };
+}
+
+export async function moveCardToBoard(cardId: string, targetListId: string) {
+  const { card, board: sourceBoard, userId } = await requireCardAccess(cardId);
+  const { list: targetList, board: targetBoard } = await requireListAccess(targetListId);
+
+  if (sourceBoard.id === targetBoard.id) throw new Error("Card is already on this board");
+
+  const [{ maxPosition }] = await db
+    .select({ maxPosition: max(cards.position) })
+    .from(cards)
+    .where(eq(cards.listId, targetListId));
+
+  // Labels, members, sprint assignment, and links are all board-scoped —
+  // none of them are valid once the card belongs to a different board.
+  await db.delete(cardLabels).where(eq(cardLabels.cardId, cardId));
+  await db.delete(cardMembers).where(eq(cardMembers.cardId, cardId));
+  await db.delete(cardLinks).where(or(eq(cardLinks.cardId, cardId), eq(cardLinks.linkedCardId, cardId)));
+
+  await db
+    .update(cards)
+    .set({ listId: targetListId, position: (maxPosition ?? 0) + 1, sprintId: null })
+    .where(eq(cards.id, cardId));
+
+  const activity = await logActivity(
+    sourceBoard.id,
+    userId,
+    null,
+    `moved card "${card.title}" to board "${targetBoard.name}"`,
+  );
+  await logActivity(
+    targetBoard.id,
+    userId,
+    cardId,
+    `card "${card.title}" moved here from board "${sourceBoard.name}" into list "${targetList.title}"`,
+  );
+
+  revalidatePath(`/boards/${sourceBoard.id}`);
+  revalidatePath(`/boards/${targetBoard.id}`);
   return { activity };
 }
 

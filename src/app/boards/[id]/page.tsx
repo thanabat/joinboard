@@ -152,6 +152,31 @@ export default async function BoardPage({
       }
     : null;
 
+  const ownedBoards = await db.query.boards.findMany({ where: eq(boards.ownerId, userId) });
+  const myMemberships = await db.query.boardMembers.findMany({
+    where: and(eq(boardMembers.userId, userId), eq(boardMembers.status, "active")),
+  });
+  const memberBoardIds = myMemberships.map((row) => row.boardId);
+  const memberOfBoards = memberBoardIds.length
+    ? await db.query.boards.findMany({ where: inArray(boards.id, memberBoardIds) })
+    : [];
+  const otherBoardsRaw = [...ownedBoards, ...memberOfBoards].filter((b) => b.id !== id);
+  const otherBoardsUnique = Array.from(new Map(otherBoardsRaw.map((b) => [b.id, b])).values());
+  const otherBoardIds = otherBoardsUnique.map((b) => b.id);
+  const otherBoardLists = otherBoardIds.length
+    ? await db.query.lists.findMany({
+        where: inArray(lists.boardId, otherBoardIds),
+        orderBy: (list, { asc }) => asc(list.position),
+      })
+    : [];
+  const otherBoards = otherBoardsUnique.map((b) => ({
+    id: b.id,
+    name: b.name,
+    lists: otherBoardLists
+      .filter((list) => list.boardId === b.id)
+      .map((list) => ({ id: list.id, title: list.title })),
+  }));
+
   const activityRows = await db.query.activities.findMany({
     where: eq(activities.boardId, id),
     orderBy: (activity, { desc }) => desc(activity.createdAt),
@@ -211,6 +236,7 @@ export default async function BoardPage({
           currentUserId={userId}
           initialActivities={initialActivities}
           initialCurrentSprint={currentSprint}
+          otherBoards={otherBoards}
         />
       </main>
     </div>

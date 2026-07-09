@@ -19,6 +19,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import {
   AlignLeft,
+  ArrowRightLeft,
   Bookmark,
   Calendar,
   Check,
@@ -56,6 +57,7 @@ import {
   inviteMember,
   linkCards,
   moveCard,
+  moveCardToBoard,
   removeMember,
   renameChecklistItem,
   completeSprint,
@@ -112,6 +114,7 @@ type CurrentSprint = {
   startDate: Date;
   endDate: Date;
 };
+type OtherBoard = { id: string; name: string; lists: { id: string; title: string }[] };
 type CardUpdates = { title: string; description: string | null; dueDate: string | null };
 type CardCreateDetails = {
   title: string;
@@ -304,6 +307,7 @@ export function Board({
   currentUserId,
   initialActivities,
   initialCurrentSprint,
+  otherBoards,
 }: {
   boardId: string;
   initialLists: ListData[];
@@ -317,6 +321,7 @@ export function Board({
   currentUserId: string;
   initialActivities: Activity[];
   initialCurrentSprint: CurrentSprint | null;
+  otherBoards: OtherBoard[];
 }) {
   const [lists, setLists] = useState(initialLists);
   const [boardLabels, setBoardLabels] = useState(initialLabels);
@@ -328,6 +333,7 @@ export function Board({
   const [editingListId, setEditingListId] = useState<string | null>(null);
   const [detailCardId, setDetailCardId] = useState<string | null>(null);
   const [creatingCardListId, setCreatingCardListId] = useState<string | null>(null);
+  const [movingCardId, setMovingCardId] = useState<string | null>(null);
   const [showMembers, setShowMembers] = useState(false);
   const [showCreateSprint, setShowCreateSprint] = useState(false);
   const [activities, setActivities] = useState(initialActivities);
@@ -579,6 +585,14 @@ export function Board({
       });
     });
     const { activity } = await moveCard(cardId, targetListId);
+    pushActivity(activity);
+  }
+
+  async function handleMoveCardToBoard(cardId: string, targetListId: string) {
+    setLists((prev) => prev.map((list) => ({ ...list, cards: list.cards.filter((c) => c.id !== cardId) })));
+    setMovingCardId(null);
+    if (detailCardId === cardId) setDetailCardId(null);
+    const { activity } = await moveCardToBoard(cardId, targetListId);
     pushActivity(activity);
   }
 
@@ -874,6 +888,7 @@ export function Board({
   const detailCardListId = lists.find((list) =>
     list.cards.some((card) => card.id === detailCardId),
   )?.id;
+  const movingCard = lists.flatMap((list) => list.cards).find((card) => card.id === movingCardId);
 
   const doneList = lists.find((list) => list.isDoneList);
   const sprintCards = currentSprint
@@ -964,6 +979,8 @@ export function Board({
                   onAddCard={setCreatingCardListId}
                   onOpenCardDetail={setDetailCardId}
                   onDeleteCard={handleDeleteCard}
+                  canMoveToBoard={otherBoards.length > 0}
+                  onMoveToBoard={setMovingCardId}
                 />
               ))}
             </SortableContext>
@@ -1049,6 +1066,15 @@ export function Board({
         {showCreateSprint && (
           <CreateSprintModal onClose={() => setShowCreateSprint(false)} onCreate={handleCreateSprint} />
         )}
+
+        {movingCard && (
+          <MoveCardToBoardModal
+            cardTitle={movingCard.title}
+            otherBoards={otherBoards}
+            onClose={() => setMovingCardId(null)}
+            onMove={(targetListId) => handleMoveCardToBoard(movingCard.id, targetListId)}
+          />
+        )}
       </div>
       <ActivitySidebar
         activities={activities}
@@ -1075,6 +1101,8 @@ function SortableList({
   onAddCard,
   onOpenCardDetail,
   onDeleteCard,
+  canMoveToBoard,
+  onMoveToBoard,
 }: {
   list: ListData;
   boardLabels: Label[];
@@ -1091,6 +1119,8 @@ function SortableList({
   onAddCard: (listId: string) => void;
   onOpenCardDetail: (cardId: string) => void;
   onDeleteCard: (cardId: string) => void;
+  canMoveToBoard: boolean;
+  onMoveToBoard: (cardId: string) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: list.id,
@@ -1183,6 +1213,8 @@ function SortableList({
               currentSprint={currentSprint}
               onOpenDetail={() => onOpenCardDetail(card.id)}
               onDelete={onDeleteCard}
+              canMoveToBoard={canMoveToBoard}
+              onMoveToBoard={onMoveToBoard}
             />
           ))}
         </ul>
@@ -1209,6 +1241,8 @@ function SortableCard({
   currentSprint,
   onOpenDetail,
   onDelete,
+  canMoveToBoard,
+  onMoveToBoard,
 }: {
   card: CardItem;
   boardLabels: Label[];
@@ -1218,6 +1252,8 @@ function SortableCard({
   currentSprint: CurrentSprint | null;
   onOpenDetail: () => void;
   onDelete: (cardId: string) => void;
+  canMoveToBoard: boolean;
+  onMoveToBoard: (cardId: string) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: card.id,
@@ -1283,6 +1319,17 @@ function SortableCard({
       <div className="flex items-start justify-between gap-2">
         <span className="flex-1 leading-snug">{card.title}</span>
         <div className="flex shrink-0 gap-0.5 opacity-0 transition group-hover/card:opacity-100">
+          {canMoveToBoard && (
+            <button
+              type="button"
+              onClick={() => onMoveToBoard(card.id)}
+              aria-label="Move to another board"
+              title="Move to another board"
+              className={iconButtonClass}
+            >
+              <ArrowRightLeft className="h-3.5 w-3.5" />
+            </button>
+          )}
           <button type="button" onClick={onOpenDetail} aria-label="Edit card" className={iconButtonClass}>
             <Pencil className="h-3.5 w-3.5" />
           </button>
@@ -2473,6 +2520,106 @@ function CreateSprintModal({
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+function MoveCardToBoardModal({
+  cardTitle,
+  otherBoards,
+  onClose,
+  onMove,
+}: {
+  cardTitle: string;
+  otherBoards: OtherBoard[];
+  onClose: () => void;
+  onMove: (targetListId: string) => void;
+}) {
+  const [selectedBoard, setSelectedBoard] = useState<OtherBoard | null>(null);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  return (
+    <div
+      className="animate-overlay-in fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        onClick={(event) => event.stopPropagation()}
+        className="animate-modal-in flex max-h-[85vh] w-full max-w-sm flex-col gap-4 overflow-y-auto rounded-lg border bg-card p-5 shadow-lg"
+      >
+        <div>
+          <h2 className="flex items-center gap-1.5 text-base font-semibold tracking-tight">
+            <ArrowRightLeft className="h-4 w-4" />
+            Move to another board
+          </h2>
+          <p className="mt-0.5 truncate text-sm text-muted-foreground">&quot;{cardTitle}&quot;</p>
+        </div>
+
+        {selectedBoard ? (
+          <div className="flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={() => setSelectedBoard(null)}
+              className="flex cursor-pointer items-center gap-1 self-start text-sm font-medium text-primary hover:underline"
+            >
+              ← Back to boards
+            </button>
+            <span className="text-sm font-medium text-muted-foreground">
+              Choose a list on &quot;{selectedBoard.name}&quot;
+            </span>
+            {selectedBoard.lists.length === 0 ? (
+              <p className="text-sm text-muted-foreground">This board has no lists yet.</p>
+            ) : (
+              <ul className="flex flex-col gap-1">
+                {selectedBoard.lists.map((list) => (
+                  <li key={list.id}>
+                    <button
+                      type="button"
+                      onClick={() => onMove(list.id)}
+                      className="w-full cursor-pointer rounded-md border px-3 py-2 text-left text-sm transition hover:border-primary hover:bg-primary-tint"
+                    >
+                      {list.title}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : (
+          <ul className="flex flex-col gap-1">
+            {otherBoards.map((board) => (
+              <li key={board.id}>
+                <button
+                  type="button"
+                  onClick={() => setSelectedBoard(board)}
+                  className="w-full cursor-pointer rounded-md border px-3 py-2 text-left text-sm transition hover:border-primary hover:bg-primary-tint"
+                >
+                  {board.name}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="flex items-center justify-end border-t pt-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className="cursor-pointer rounded-md border bg-card px-3.5 py-1.5 text-sm font-medium transition hover:bg-muted"
+          >
+            Cancel
+          </button>
+        </div>
       </div>
     </div>
   );
