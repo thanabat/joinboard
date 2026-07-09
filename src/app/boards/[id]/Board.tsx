@@ -1061,7 +1061,9 @@ function SortableCard({
     <li
       ref={setNodeRef}
       style={style}
-      className={`group/card rounded-md border bg-card px-3 py-2.5 text-sm shadow-xs transition hover:shadow-md ${
+      {...attributes}
+      {...listeners}
+      className={`group/card cursor-grab rounded-md border bg-card px-3 py-2.5 text-sm shadow-xs transition hover:shadow-md ${
         isDragging ? "opacity-60 shadow-md" : ""
       }`}
     >
@@ -1097,9 +1099,7 @@ function SortableCard({
         </div>
       )}
       <div className="flex items-start justify-between gap-2">
-        <span {...attributes} {...listeners} className="flex-1 cursor-grab leading-snug">
-          {card.title}
-        </span>
+        <span className="flex-1 leading-snug">{card.title}</span>
         <div className="flex shrink-0 gap-0.5 opacity-0 transition group-hover/card:opacity-100">
           <button type="button" onClick={onOpenDetail} aria-label="Edit card" className={iconButtonClass}>
             <Pencil className="h-3.5 w-3.5" />
