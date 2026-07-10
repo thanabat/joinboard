@@ -146,9 +146,17 @@ export default async function BoardPage({
       }),
   ];
 
-  const currentSprintRow = await db.query.sprints.findFirst({
-    where: and(eq(sprints.boardId, id), or(eq(sprints.status, "planned"), eq(sprints.status, "active"))),
-  });
+  // Multiple planned sprints can coexist (planned ahead on the Backlog page),
+  // but at most one is ever active — prefer showing that one here; otherwise
+  // fall back to whichever planned sprint starts soonest.
+  const currentSprintRow =
+    (await db.query.sprints.findFirst({
+      where: and(eq(sprints.boardId, id), eq(sprints.status, "active")),
+    })) ??
+    (await db.query.sprints.findFirst({
+      where: and(eq(sprints.boardId, id), eq(sprints.status, "planned")),
+      orderBy: (sprint, { asc }) => asc(sprint.startDate),
+    }));
   const currentSprint = currentSprintRow
     ? {
         id: currentSprintRow.id,

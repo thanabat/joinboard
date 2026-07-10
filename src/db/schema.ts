@@ -156,6 +156,9 @@ export const cards = pgTable("card", {
   // Jira-style epic grouping — points at another card of type "epic" on the
   // same board. Null means not assigned to an epic.
   epicId: text("epicId").references((): AnyPgColumn => cards.id, { onDelete: "set null" }),
+  // Set automatically when the card enters/leaves the board's Done list —
+  // drives sprint burndown charts. Null means not currently done.
+  completedAt: timestamp("completedAt", { mode: "date" }),
   createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
 });
 

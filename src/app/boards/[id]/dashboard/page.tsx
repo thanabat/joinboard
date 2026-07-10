@@ -4,13 +4,14 @@ import { boardMembers, boards, cardMembers, cards, checklistItems, lists, sprint
 import { eq, inArray, and } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { Bookmark, ListChecks, Rocket, SquareCheck, Users as UsersIcon } from "lucide-react";
+import { Bookmark, Hash, ListChecks, Milestone, Rocket, SquareCheck, TrendingDown, Users as UsersIcon } from "lucide-react";
 import { displayName } from "@/lib/displayName";
 import { BoardTabs } from "../BoardTabs";
 
 const CARD_TYPES = {
-  task: { label: "Task", icon: SquareCheck, color: "#4f46e5" },
+  epic: { label: "Epic", icon: Milestone, color: "#9333ea" },
   backlog_item: { label: "Product Backlog Item", icon: Bookmark, color: "#d97706" },
+  task: { label: "Task", icon: SquareCheck, color: "#4f46e5" },
 } as const;
 
 export default async function DashboardPage({
@@ -109,6 +110,7 @@ export default async function DashboardPage({
       return {
         ...member,
         total: memberCards.length,
+        points: memberCards.reduce((sum, card) => sum + (card.storyPoints ?? 0), 0),
         overdue: memberCards.filter((card) => card.dueDate && card.dueDate < now).length,
       };
     })
@@ -122,7 +124,14 @@ export default async function DashboardPage({
     where: eq(sprints.boardId, id),
     orderBy: (sprint, { desc }) => desc(sprint.createdAt),
   });
-  const currentSprint = boardSprints.find((sprint) => sprint.status !== "completed");
+  // Multiple planned sprints can coexist (planned ahead on the Backlog page),
+  // but at most one is ever active — that's the one worth showing progress
+  // and a burndown for here; otherwise fall back to the soonest planned one.
+  const currentSprint =
+    boardSprints.find((sprint) => sprint.status === "active") ??
+    boardSprints
+      .filter((sprint) => sprint.status === "planned")
+      .sort((a, b) => a.startDate.getTime() - b.startDate.getTime())[0];
   const pastSprints = boardSprints.filter((sprint) => sprint.status === "completed");
 
   const sprintProgress = (sprint: (typeof boardSprints)[number]) => {
@@ -131,9 +140,43 @@ export default async function DashboardPage({
     return { total: sprintCards.length, done: doneCards.length };
   };
 
+  const sprintPointsProgress = (sprint: (typeof boardSprints)[number]) => {
+    const sprintCards = boardCards.filter((card) => card.sprintId === sprint.id);
+    const totalPoints = sprintCards.reduce((sum, card) => sum + (card.storyPoints ?? 0), 0);
+    const donePoints = sprintCards
+      .filter((card) => doneList && card.listId === doneList.id)
+      .reduce((sum, card) => sum + (card.storyPoints ?? 0), 0);
+    return { totalPoints, donePoints };
+  };
+
   const daysRemaining = currentSprint
     ? Math.ceil((currentSprint.endDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000))
     : null;
+
+  // Burndown: remaining story points per day of the sprint, plotted against
+  // the ideal straight-line pace from the sprint's total points down to 0.
+  const msPerDay = 24 * 60 * 60 * 1000;
+  const burndown =
+    currentSprint && currentSprint.status === "active"
+      ? (() => {
+          const sprintCards = boardCards.filter((card) => card.sprintId === currentSprint.id);
+          const totalPoints = sprintCards.reduce((sum, card) => sum + (card.storyPoints ?? 0), 0);
+          const totalDays = Math.max(
+            1,
+            Math.round((currentSprint.endDate.getTime() - currentSprint.startDate.getTime()) / msPerDay),
+          );
+          const points = Array.from({ length: totalDays + 1 }, (_, day) => {
+            const date = new Date(currentSprint.startDate.getTime() + day * msPerDay);
+            const ideal = totalPoints * (1 - day / totalDays);
+            if (date.getTime() > now.getTime()) return { day, date, ideal, actual: null };
+            const completedPoints = sprintCards
+              .filter((card) => card.completedAt && card.completedAt.getTime() <= date.getTime())
+              .reduce((sum, card) => sum + (card.storyPoints ?? 0), 0);
+            return { day, date, ideal, actual: totalPoints - completedPoints };
+          });
+          return { totalPoints, totalDays, points };
+        })()
+      : null;
 
   return (
     <div className="flex flex-1 flex-col">
@@ -194,33 +237,50 @@ export default async function DashboardPage({
                       : "shrink-0 rounded bg-muted px-2 py-1 text-xs font-medium text-muted-foreground"
                   }
                 >
-                  {currentSprint.status === "active" ? "Active" : "Planned — start it on the board"}
+                  {currentSprint.status === "active" ? "Active" : "Planned — start it on the Sprints page"}
                 </span>
               </div>
               {(() => {
                 const { total, done } = sprintProgress(currentSprint);
+                const { totalPoints, donePoints } = sprintPointsProgress(currentSprint);
                 return (
-                  <div className="flex flex-col gap-1.5">
-                    <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                      <div
-                        className="h-full rounded-full bg-accent"
-                        style={{ width: `${total === 0 ? 0 : (done / total) * 100}%` }}
-                      />
+                  <div className="flex flex-col gap-2">
+                    <div className="flex flex-col gap-1.5">
+                      <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full bg-accent"
+                          style={{ width: `${total === 0 ? 0 : (done / total) * 100}%` }}
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {done}/{total} cards done
+                      </p>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      {done}/{total} cards done
-                    </p>
+                    {totalPoints > 0 && (
+                      <div className="flex flex-col gap-1.5">
+                        <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full rounded-full bg-primary"
+                            style={{ width: `${(donePoints / totalPoints) * 100}%` }}
+                          />
+                        </div>
+                        <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <Hash className="h-3 w-3" />
+                          {donePoints}/{totalPoints} points done
+                        </p>
+                      </div>
+                    )}
                   </div>
                 );
               })()}
             </div>
           ) : (
             <Link
-              href={`/boards/${id}`}
+              href={`/boards/${id}/backlog`}
               className="flex items-center gap-1.5 rounded-lg border border-dashed bg-card px-3 py-2 text-sm text-muted-foreground transition hover:bg-muted hover:text-foreground"
             >
               <Rocket className="h-3.5 w-3.5" />
-              No sprint yet — start one from the board
+              No sprint yet — plan one on the Sprints page
             </Link>
           )}
 
@@ -249,6 +309,99 @@ export default async function DashboardPage({
             </div>
           )}
         </section>
+
+        {burndown && (
+          <section className="flex flex-col gap-3">
+            <h2 className="flex items-center gap-1.5 text-sm font-semibold text-muted-foreground">
+              <TrendingDown className="h-3.5 w-3.5" />
+              Burndown
+            </h2>
+            <div className="flex flex-col gap-3 rounded-lg border bg-card p-4">
+              {burndown.totalPoints === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No estimated cards in this sprint yet — add story points to see a burndown.
+                </p>
+              ) : (
+                (() => {
+                  const width = 640;
+                  const height = 240;
+                  const padding = { top: 12, right: 12, bottom: 28, left: 32 };
+                  const plotWidth = width - padding.left - padding.right;
+                  const plotHeight = height - padding.top - padding.bottom;
+                  const x = (day: number) => padding.left + (day / burndown.totalDays) * plotWidth;
+                  const y = (value: number) =>
+                    padding.top + (1 - value / burndown.totalPoints) * plotHeight;
+
+                  const idealPath = burndown.points
+                    .map((point, index) => `${index === 0 ? "M" : "L"}${x(point.day)},${y(point.ideal)}`)
+                    .join(" ");
+                  const actualPoints = burndown.points.filter(
+                    (point): point is typeof point & { actual: number } => point.actual !== null,
+                  );
+                  const actualPath = actualPoints
+                    .map((point, index) => `${index === 0 ? "M" : "L"}${x(point.day)},${y(point.actual)}`)
+                    .join(" ");
+
+                  return (
+                    <>
+                      <svg viewBox={`0 0 ${width} ${height}`} className="w-full">
+                        {[0, 0.5, 1].map((fraction) => (
+                          <line
+                            key={fraction}
+                            x1={padding.left}
+                            x2={width - padding.right}
+                            y1={y(burndown.totalPoints * fraction)}
+                            y2={y(burndown.totalPoints * fraction)}
+                            className="stroke-border"
+                            strokeWidth={1}
+                          />
+                        ))}
+                        {[0, 0.5, 1].map((fraction) => (
+                          <text
+                            key={fraction}
+                            x={padding.left - 6}
+                            y={y(burndown.totalPoints * fraction)}
+                            textAnchor="end"
+                            dominantBaseline="middle"
+                            className="fill-muted-foreground text-[10px]"
+                          >
+                            {Math.round(burndown.totalPoints * fraction)}
+                          </text>
+                        ))}
+                        <path d={idealPath} fill="none" className="stroke-muted-foreground" strokeDasharray="4 3" strokeWidth={1.5} />
+                        <path d={actualPath} fill="none" className="stroke-primary" strokeWidth={2} />
+                        {actualPoints.map((point) => (
+                          <circle key={point.day} cx={x(point.day)} cy={y(point.actual)} r={2.5} className="fill-primary" />
+                        ))}
+                        <text x={padding.left} y={height - 8} textAnchor="start" className="fill-muted-foreground text-[10px]">
+                          {burndown.points[0].date.toLocaleDateString("en-US")}
+                        </text>
+                        <text
+                          x={width - padding.right}
+                          y={height - 8}
+                          textAnchor="end"
+                          className="fill-muted-foreground text-[10px]"
+                        >
+                          {burndown.points[burndown.points.length - 1].date.toLocaleDateString("en-US")}
+                        </text>
+                      </svg>
+                      <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                        <span className="flex items-center gap-1.5">
+                          <span className="h-0.5 w-4 shrink-0 border-t-2 border-dashed border-muted-foreground" />
+                          Ideal
+                        </span>
+                        <span className="flex items-center gap-1.5">
+                          <span className="h-0.5 w-4 shrink-0 bg-primary" />
+                          Actual
+                        </span>
+                      </div>
+                    </>
+                  );
+                })()
+              )}
+            </div>
+          </section>
+        )}
 
         <section className="flex flex-col gap-3">
           <h2 className="text-sm font-semibold text-muted-foreground">Task summary</h2>
@@ -356,6 +509,12 @@ export default async function DashboardPage({
                     />
                   </div>
                   <span className="w-6 shrink-0 text-right text-sm text-muted-foreground">{member.total}</span>
+                  {member.points > 0 && (
+                    <span className="flex shrink-0 items-center gap-0.5 text-xs font-medium text-muted-foreground">
+                      <Hash className="h-3 w-3" />
+                      {member.points}
+                    </span>
+                  )}
                   {member.overdue > 0 && (
                     <span className="shrink-0 text-xs font-medium text-destructive">
                       {member.overdue} overdue

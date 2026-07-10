@@ -3,7 +3,7 @@
 import { auth } from "@/auth";
 import { db } from "@/db";
 import { activities, boardMembers, boards, cardLabels, cardLinks, cardMembers, cards, checklistItems, comments, labels, lists, sprints, users } from "@/db/schema";
-import { and, eq, inArray, max, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, max, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { displayName } from "@/lib/displayName";
 
@@ -129,6 +129,7 @@ export async function createCard(
       priority: details.priority,
       storyPoints: details.storyPoints,
       position: (maxPosition ?? 0) + 1,
+      completedAt: list.isDoneList ? new Date() : null,
     })
     .returning();
 
@@ -228,7 +229,11 @@ export async function moveCard(cardId: string, targetListId: string) {
 
   await db
     .update(cards)
-    .set({ listId: targetListId, position: (maxPosition ?? 0) + 1 })
+    .set({
+      listId: targetListId,
+      position: (maxPosition ?? 0) + 1,
+      completedAt: targetList.isDoneList ? new Date() : currentList.isDoneList ? null : card.completedAt,
+    })
     .where(eq(cards.id, cardId));
 
   const activity =
@@ -277,6 +282,7 @@ export async function moveCardToBoard(cardId: string, targetListId: string) {
       number: (maxNumber ?? 0) + 1,
       sprintId: null,
       epicId: null,
+      completedAt: targetList.isDoneList ? new Date() : null,
     })
     .where(eq(cards.id, cardId));
 
@@ -638,21 +644,40 @@ export async function reorderCards(
     .map((update) => ({ update, card: affectedCards.find((card) => card.id === update.id) }))
     .find(({ update, card }) => card && card.listId !== update.listId);
 
+  // The updates array only carries the destination list, so a card's source
+  // list (needed for both the activity message and completedAt tracking)
+  // may not be in validLists yet — fetch whatever's missing in one shot.
+  const sourceListIds = affectedCards.map((card) => card.listId);
+  const missingListIds = sourceListIds.filter((listId) => !validListIds.has(listId));
+  const sourceLists = missingListIds.length
+    ? await db.query.lists.findMany({ where: inArray(lists.id, missingListIds) })
+    : [];
+  const listById = new Map([...validLists, ...sourceLists].map((list) => [list.id, list]));
+
   await Promise.all(
-    updates.map((update) =>
-      db
+    updates.map((update) => {
+      const card = affectedCards.find((candidate) => candidate.id === update.id);
+      const sourceList = card ? listById.get(card.listId) : undefined;
+      const targetList = listById.get(update.listId);
+      const listChanged = card && card.listId !== update.listId;
+      const completedAt = !listChanged
+        ? card?.completedAt
+        : targetList?.isDoneList
+          ? new Date()
+          : sourceList?.isDoneList
+            ? null
+            : card?.completedAt;
+      return db
         .update(cards)
-        .set({ listId: update.listId, position: update.position })
-        .where(eq(cards.id, update.id)),
-    ),
+        .set({ listId: update.listId, position: update.position, completedAt })
+        .where(eq(cards.id, update.id));
+    }),
   );
 
   let activity;
   if (moved?.card) {
-    const targetList = validLists.find((list) => list.id === moved.update.listId);
-    const sourceList =
-      validLists.find((list) => list.id === moved.card!.listId) ??
-      (await db.query.lists.findFirst({ where: eq(lists.id, moved.card!.listId) }));
+    const targetList = listById.get(moved.update.listId);
+    const sourceList = listById.get(moved.card.listId);
     activity = await logActivity(
       boardId,
       userId,
@@ -865,11 +890,9 @@ export async function createSprint(boardId: string, name: string, startDate: str
   const trimmed = name.trim();
   if (!trimmed) throw new Error("Name is required");
 
-  const existing = await db.query.sprints.findFirst({
-    where: and(eq(sprints.boardId, boardId), inArray(sprints.status, ["planned", "active"])),
-  });
-  if (existing) throw new Error("Complete the current sprint before creating a new one");
-
+  // New sprints always start out "planned" — any number of them can coexist
+  // (planned ahead of time), even while another sprint is active. Only
+  // starting a sprint enforces the one-active-at-a-time rule.
   const [sprint] = await db
     .insert(sprints)
     .values({ boardId, name: trimmed, startDate: new Date(startDate), endDate: new Date(endDate) })
@@ -885,6 +908,11 @@ export async function startSprint(sprintId: string) {
   if (!sprint) throw new Error("Sprint not found");
   const { userId } = await requireBoardAccess(sprint.boardId);
   if (sprint.status !== "planned") throw new Error("Sprint already started");
+
+  const existingActive = await db.query.sprints.findFirst({
+    where: and(eq(sprints.boardId, sprint.boardId), eq(sprints.status, "active")),
+  });
+  if (existingActive) throw new Error("Complete the active sprint before starting another");
 
   await db.update(sprints).set({ status: "active" }).where(eq(sprints.id, sprintId));
 
@@ -908,6 +936,13 @@ export async function completeSprint(sprintId: string) {
 export async function setCardSprint(cardId: string, sprintId: string | null) {
   const { card, list, userId } = await requireCardAccess(cardId);
 
+  const doneList = await db.query.lists.findFirst({
+    where: and(eq(lists.boardId, list.boardId), eq(lists.isDoneList, true)),
+  });
+  if (doneList && card.listId === doneList.id) {
+    throw new Error("Completed cards can't be moved between sprints");
+  }
+
   if (sprintId) {
     const sprint = await db.query.sprints.findFirst({ where: eq(sprints.id, sprintId) });
     if (!sprint || sprint.boardId !== list.boardId) throw new Error("Sprint not found");
@@ -927,10 +962,22 @@ export async function setListDone(listId: string, isDone: boolean) {
   const { list, board, userId } = await requireListAccess(listId);
 
   if (isDone) {
+    const previousDoneList = await db.query.lists.findFirst({
+      where: and(eq(lists.boardId, board.id), eq(lists.isDoneList, true)),
+    });
+    if (previousDoneList && previousDoneList.id !== listId) {
+      await db.update(cards).set({ completedAt: null }).where(eq(cards.listId, previousDoneList.id));
+    }
     await db
       .update(lists)
       .set({ isDoneList: false })
       .where(and(eq(lists.boardId, board.id), eq(lists.isDoneList, true)));
+    await db
+      .update(cards)
+      .set({ completedAt: new Date() })
+      .where(and(eq(cards.listId, listId), isNull(cards.completedAt)));
+  } else {
+    await db.update(cards).set({ completedAt: null }).where(eq(cards.listId, listId));
   }
   await db.update(lists).set({ isDoneList: isDone }).where(eq(lists.id, listId));
 
