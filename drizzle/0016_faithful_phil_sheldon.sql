@@ -1,0 +1,2 @@
+ALTER TABLE "card" ADD COLUMN "epicId" text;--> statement-breakpoint
+ALTER TABLE "card" ADD CONSTRAINT "card_epicId_card_id_fk" FOREIGN KEY ("epicId") REFERENCES "public"."card"("id") ON DELETE set null ON UPDATE no action;

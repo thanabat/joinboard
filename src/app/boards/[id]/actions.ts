@@ -111,10 +111,17 @@ export async function createCard(
     .from(cards)
     .where(eq(cards.listId, listId));
 
+  const [{ maxNumber }] = await db
+    .select({ maxNumber: max(cards.number) })
+    .from(cards)
+    .innerJoin(lists, eq(cards.listId, lists.id))
+    .where(eq(lists.boardId, list.boardId));
+
   const [card] = await db
     .insert(cards)
     .values({
       listId,
+      number: (maxNumber ?? 0) + 1,
       title: trimmed,
       description: details.description?.trim() || null,
       dueDate: details.dueDate ? new Date(details.dueDate) : null,
@@ -249,15 +256,28 @@ export async function moveCardToBoard(cardId: string, targetListId: string) {
     .from(cards)
     .where(eq(cards.listId, targetListId));
 
-  // Labels, members, sprint assignment, and links are all board-scoped —
-  // none of them are valid once the card belongs to a different board.
+  const [{ maxNumber }] = await db
+    .select({ maxNumber: max(cards.number) })
+    .from(cards)
+    .innerJoin(lists, eq(cards.listId, lists.id))
+    .where(eq(lists.boardId, targetBoard.id));
+
+  // Labels, members, sprint assignment, epic assignment, and links are all
+  // board-scoped — none of them are valid once the card belongs to a
+  // different board.
   await db.delete(cardLabels).where(eq(cardLabels.cardId, cardId));
   await db.delete(cardMembers).where(eq(cardMembers.cardId, cardId));
   await db.delete(cardLinks).where(or(eq(cardLinks.cardId, cardId), eq(cardLinks.linkedCardId, cardId)));
 
   await db
     .update(cards)
-    .set({ listId: targetListId, position: (maxPosition ?? 0) + 1, sprintId: null })
+    .set({
+      listId: targetListId,
+      position: (maxPosition ?? 0) + 1,
+      number: (maxNumber ?? 0) + 1,
+      sprintId: null,
+      epicId: null,
+    })
     .where(eq(cards.id, cardId));
 
   const activity = await logActivity(
@@ -280,10 +300,11 @@ export async function moveCardToBoard(cardId: string, targetListId: string) {
   return { activity };
 }
 
-const CARD_TYPES = ["task", "backlog_item"] as const;
+const CARD_TYPES = ["task", "backlog_item", "epic"] as const;
 const CARD_TYPE_LABELS: Record<(typeof CARD_TYPES)[number], string> = {
   task: "Task",
   backlog_item: "Product Backlog Item",
+  epic: "Epic",
 };
 
 export async function setCardType(cardId: string, type: string) {
@@ -301,6 +322,30 @@ export async function setCardType(cardId: string, type: string) {
     "card",
   );
   revalidatePath(`/boards/${board.id}`);
+  return { activity };
+}
+
+export async function setCardEpic(cardId: string, epicId: string | null) {
+  const { card, list, userId } = await requireCardAccess(cardId);
+
+  if (card.type === "epic") throw new Error("An epic card cannot be assigned to another epic");
+
+  let epic = null;
+  if (epicId) {
+    epic = await db.query.cards.findFirst({ where: eq(cards.id, epicId) });
+    if (!epic) throw new Error("Epic not found");
+    const epicList = await db.query.lists.findFirst({ where: eq(lists.id, epic.listId) });
+    if (!epicList || epicList.boardId !== list.boardId) throw new Error("Epic not found");
+    if (epic.type !== "epic") throw new Error("That card is not an epic");
+  }
+
+  await db.update(cards).set({ epicId }).where(eq(cards.id, cardId));
+
+  const message = epic
+    ? `added card "${card.title}" to epic "${epic.title}"`
+    : `removed card "${card.title}" from its epic`;
+  const activity = await logActivity(list.boardId, userId, cardId, message, "card");
+  revalidatePath(`/boards/${list.boardId}`);
   return { activity };
 }
 
@@ -759,6 +804,33 @@ export async function declineInvite(boardId: string) {
     );
 
   revalidatePath("/boards");
+}
+
+export async function updateBoard(boardId: string, name: string, key: string) {
+  const { board, userId } = await requireBoardAdmin(boardId);
+
+  const trimmedName = name.trim();
+  if (!trimmedName) throw new Error("Name is required");
+
+  const normalizedKey = key.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
+  if (!normalizedKey) throw new Error("Prefix must contain at least one letter or number");
+
+  const existing = await db.query.boards.findFirst({ where: eq(boards.key, normalizedKey) });
+  if (existing && existing.id !== boardId) {
+    throw new Error(`Prefix "${normalizedKey}" is already in use by another board`);
+  }
+
+  await db.update(boards).set({ name: trimmedName, key: normalizedKey }).where(eq(boards.id, boardId));
+
+  const changes: string[] = [];
+  if (trimmedName !== board.name) changes.push(`renamed board to "${trimmedName}"`);
+  if (normalizedKey !== board.key) changes.push(`changed board prefix to "${normalizedKey}"`);
+  const message = changes.length > 0 ? changes.join(" and ") : `updated board "${trimmedName}"`;
+  const activity = await logActivity(boardId, userId, null, message, "global");
+
+  revalidatePath(`/boards/${boardId}`);
+  revalidatePath("/boards");
+  return { activity, name: trimmedName, key: normalizedKey };
 }
 
 // --- Shareable invite link (separate from the by-email invite above — no

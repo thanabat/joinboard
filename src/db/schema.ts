@@ -6,6 +6,7 @@ import {
   integer,
   doublePrecision,
   boolean,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import type { AdapterAccountType } from "next-auth/adapters";
 
@@ -85,6 +86,9 @@ export const boards = pgTable("board", {
   createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
   // Shareable join link token — null means no active invite link for this board.
   inviteToken: text("inviteToken").unique(),
+  // Short reference key auto-derived from the board name (e.g. "DEV"), so
+  // cards can be referenced as "DEV-42". Globally unique.
+  key: text("key").notNull().unique(),
 });
 
 export const boardMembers = pgTable(
@@ -135,17 +139,23 @@ export const cards = pgTable("card", {
   listId: text("listId")
     .notNull()
     .references(() => lists.id, { onDelete: "cascade" }),
+  // Sequential per board (not per list) — combined with the board's key to
+  // form a human reference like "DEV-42".
+  number: integer("number").notNull(),
   title: text("title").notNull(),
   description: text("description"),
   position: doublePrecision("position").notNull(),
   dueDate: timestamp("dueDate", { mode: "date" }),
-  // "task" | "backlog_item" — fixed set of card types, similar to Azure DevOps work item types.
+  // "task" | "backlog_item" | "epic" — fixed set of card types, similar to Azure DevOps work item types.
   type: text("type").notNull().default("task"),
   // "high" | "medium" | "low" — priority levels.
   priority: text("priority").notNull().default("medium"),
   // Null means unestimated.
   storyPoints: integer("storyPoints"),
   sprintId: text("sprintId").references(() => sprints.id, { onDelete: "set null" }),
+  // Jira-style epic grouping — points at another card of type "epic" on the
+  // same board. Null means not assigned to an epic.
+  epicId: text("epicId").references((): AnyPgColumn => cards.id, { onDelete: "set null" }),
   createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
 });
 

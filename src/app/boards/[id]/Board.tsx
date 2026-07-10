@@ -39,6 +39,7 @@ import {
   Link2,
   ListChecks,
   MessageSquare,
+  Milestone,
   Pencil,
   Plus,
   Rocket,
@@ -100,12 +101,13 @@ type CardComment = {
   createdAt: Date;
   updatedAt: Date | null;
 };
-type CardType = "task" | "backlog_item";
+type CardType = "task" | "backlog_item" | "epic";
 type CardPriority = "high" | "medium" | "low";
 type LinkRelation = "blocks" | "is_blocked_by" | "relates_to";
 type CardLink = { id: string; relation: LinkRelation; otherCardId: string };
 type CardItem = {
   id: string;
+  number: number;
   title: string;
   description: string | null;
   dueDate: Date | null;
@@ -118,11 +120,13 @@ type CardItem = {
   storyPoints: number | null;
   links: CardLink[];
   sprintId: string | null;
+  epicId: string | null;
 };
 
 const CARD_TYPES: Record<CardType, { label: string; icon: typeof SquareCheck; color: string }> = {
-  task: { label: "Task", icon: SquareCheck, color: "#4f46e5" },
+  epic: { label: "Epic", icon: Milestone, color: "#9333ea" },
   backlog_item: { label: "Product Backlog Item", icon: Bookmark, color: "#d97706" },
+  task: { label: "Task", icon: SquareCheck, color: "#4f46e5" },
 };
 
 const CARD_PRIORITIES: Record<CardPriority, { label: string; icon: typeof SquareCheck; color: string }> = {
@@ -367,6 +371,7 @@ function MemberAvatarStack({
 
 export function Board({
   boardId,
+  boardKey,
   initialLists,
   initialLabels,
   isAdmin,
@@ -381,6 +386,7 @@ export function Board({
   otherBoards,
 }: {
   boardId: string;
+  boardKey: string;
   initialLists: ListData[];
   initialLabels: Label[];
   isAdmin: boolean;
@@ -608,6 +614,7 @@ export function Board({
                 ...list.cards,
                 {
                   id: card.id,
+                  number: card.number,
                   title: card.title,
                   description: card.description,
                   dueDate: card.dueDate,
@@ -620,6 +627,7 @@ export function Board({
                   storyPoints: card.storyPoints,
                   links: [],
                   sprintId: null,
+                  epicId: null,
                 },
               ],
             }
@@ -1077,6 +1085,10 @@ export function Board({
   const movingCard = lists.flatMap((list) => list.cards).find((card) => card.id === movingCardId);
   const commentsLoading = detailCardId !== null && loadedCommentsCardId !== detailCardId;
 
+  const epicTitleById = new Map(
+    lists.flatMap((list) => list.cards).filter((card) => card.type === "epic").map((card) => [card.id, card.title]),
+  );
+
   const doneList = lists.find((list) => list.isDoneList);
   const sprintCards = currentSprint
     ? lists.flatMap((list) => list.cards).filter((card) => card.sprintId === currentSprint.id)
@@ -1396,11 +1408,13 @@ export function Board({
                 <SortableList
                   key={list.id}
                   list={list}
+                  boardKey={boardKey}
                   boardLabels={boardLabels}
                   assignableMembers={assignableMembers}
                   showLabelText={showLabelText}
                   onToggleLabelText={handleToggleLabelText}
                   currentSprint={currentSprint}
+                  epicTitleById={epicTitleById}
                   isEditing={editingListId === list.id}
                   onStartEdit={() => setEditingListId(list.id)}
                   onCancelEdit={() => setEditingListId(null)}
@@ -1440,6 +1454,7 @@ export function Board({
             <CardDetailModal
               key={detailCard.id}
               card={detailCard}
+              boardKey={boardKey}
               boardLabels={boardLabels}
               assignableMembers={assignableMembers}
               currentUserId={currentUserId}
@@ -1524,11 +1539,13 @@ export function Board({
 
 function SortableList({
   list,
+  boardKey,
   boardLabels,
   assignableMembers,
   showLabelText,
   onToggleLabelText,
   currentSprint,
+  epicTitleById,
   isEditing,
   onStartEdit,
   onCancelEdit,
@@ -1542,11 +1559,13 @@ function SortableList({
   onMoveToBoard,
 }: {
   list: ListData;
+  boardKey: string;
   boardLabels: Label[];
   assignableMembers: AssignableMember[];
   showLabelText: boolean;
   onToggleLabelText: () => void;
   currentSprint: CurrentSprint | null;
+  epicTitleById: Map<string, string>;
   isEditing: boolean;
   onStartEdit: () => void;
   onCancelEdit: () => void;
@@ -1643,11 +1662,13 @@ function SortableList({
             <SortableCard
               key={card.id}
               card={card}
+              boardKey={boardKey}
               boardLabels={boardLabels}
               assignableMembers={assignableMembers}
               showLabelText={showLabelText}
               onToggleLabelText={onToggleLabelText}
               currentSprint={currentSprint}
+              epicTitle={card.epicId ? epicTitleById.get(card.epicId) : undefined}
               onOpenDetail={() => onOpenCardDetail(card.id)}
               onDelete={onDeleteCard}
               canMoveToBoard={canMoveToBoard}
@@ -1671,22 +1692,26 @@ function SortableList({
 
 function SortableCard({
   card,
+  boardKey,
   boardLabels,
   assignableMembers,
   showLabelText,
   onToggleLabelText,
   currentSprint,
+  epicTitle,
   onOpenDetail,
   onDelete,
   canMoveToBoard,
   onMoveToBoard,
 }: {
   card: CardItem;
+  boardKey: string;
   boardLabels: Label[];
   assignableMembers: AssignableMember[];
   showLabelText: boolean;
   onToggleLabelText: () => void;
   currentSprint: CurrentSprint | null;
+  epicTitle: string | undefined;
   onOpenDetail: () => void;
   onDelete: (cardId: string) => void;
   canMoveToBoard: boolean;
@@ -1748,6 +1773,16 @@ function SortableCard({
             Sprint
           </span>
         )}
+        {epicTitle && (
+          <span
+            title={`Epic: ${epicTitle}`}
+            className="ml-1 inline-flex min-w-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium"
+            style={{ color: CARD_TYPES.epic.color, backgroundColor: `${CARD_TYPES.epic.color}1a` }}
+          >
+            <Milestone className="h-3 w-3 shrink-0" />
+            <span className="truncate">{epicTitle}</span>
+          </span>
+        )}
       </div>
 
       {cardLabels.length > 0 && (
@@ -1772,7 +1807,12 @@ function SortableCard({
         </div>
       )}
       <div className="flex items-start justify-between gap-2">
-        <span className="flex-1 leading-snug">{card.title}</span>
+        <span className="flex-1 leading-snug">
+          <span className="mr-1 font-mono text-xs text-muted-foreground">
+            {boardKey}-{card.number}
+          </span>
+          {card.title}
+        </span>
         <div className="flex shrink-0 gap-0.5 opacity-0 transition group-hover/card:opacity-100">
           {canMoveToBoard && (
             <button
@@ -1856,6 +1896,7 @@ function SortableCard({
 
 function CardDetailModal({
   card,
+  boardKey,
   boardLabels,
   assignableMembers,
   currentUserId,
@@ -1887,6 +1928,7 @@ function CardDetailModal({
   onDeleteComment,
 }: {
   card: CardItem;
+  boardKey: string;
   boardLabels: Label[];
   assignableMembers: AssignableMember[];
   currentUserId: string;
@@ -1956,6 +1998,11 @@ function CardDetailModal({
   });
 
   const allCards = lists.flatMap((list) => list.cards);
+  const doneList = lists.find((list) => list.isDoneList);
+  const childCards = allCards.filter((candidate) => candidate.epicId === card.id);
+  const doneChildCount = doneList
+    ? childCards.filter((child) => doneList.cards.some((c) => c.id === child.id)).length
+    : 0;
   const linkedCardIds = new Set(card.links.map((link) => link.otherCardId));
   const linkableCards = allCards.filter(
     (candidate) =>
@@ -1988,7 +2035,8 @@ function CardDetailModal({
             const form = event.currentTarget;
             const title = (form.elements.namedItem("title") as HTMLInputElement).value;
             const description = (form.elements.namedItem("description") as HTMLTextAreaElement).value;
-            const dueDate = (form.elements.namedItem("dueDate") as HTMLInputElement).value;
+            const dueDateInput = form.elements.namedItem("dueDate") as HTMLInputElement | null;
+            const dueDate = dueDateInput ? dueDateInput.value : "";
             const storyPointsInput = form.elements.namedItem("storyPoints") as HTMLInputElement | null;
             const storyPoints = storyPointsInput ? storyPointsInput.value : String(card.storyPoints ?? "");
             onSave(card.id, {
@@ -2000,6 +2048,10 @@ function CardDetailModal({
           }}
           className="flex min-w-0 flex-col gap-4"
         >
+          <span className="font-mono text-xs text-muted-foreground">
+            {boardKey}-{card.number}
+          </span>
+
           <input
             name="title"
             defaultValue={card.title}
@@ -2283,6 +2335,17 @@ function CardDetailModal({
             </div>
           </div>
 
+          {card.type === "epic" && (
+            <div className="flex items-center gap-2 rounded-lg border bg-card px-3 py-2">
+              <Milestone className="h-4 w-4 shrink-0" style={{ color: CARD_TYPES.epic.color }} />
+              <span className="text-sm text-muted-foreground">
+                {childCards.length > 0
+                  ? `${doneChildCount}/${childCards.length} done`
+                  : "No cards assigned to this epic yet"}
+              </span>
+            </div>
+          )}
+
           {card.labelIds.length > 0 && (
             <div className="flex flex-col gap-2">
               <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
@@ -2393,18 +2456,20 @@ function CardDetailModal({
           )}
 
           <div className="grid grid-cols-2 gap-3">
-            <label className="flex flex-col gap-1.5 text-sm font-medium text-muted-foreground">
-              <span className="flex items-center gap-1.5">
-                <Calendar className="h-3.5 w-3.5" />
-                Due date
-              </span>
-              <input
-                name="dueDate"
-                type="date"
-                defaultValue={card.dueDate ? card.dueDate.toISOString().slice(0, 10) : ""}
-                className="rounded-md border bg-background px-2.5 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
-              />
-            </label>
+            {card.type !== "epic" && (
+              <label className="flex flex-col gap-1.5 text-sm font-medium text-muted-foreground">
+                <span className="flex items-center gap-1.5">
+                  <Calendar className="h-3.5 w-3.5" />
+                  Due date
+                </span>
+                <input
+                  name="dueDate"
+                  type="date"
+                  defaultValue={card.dueDate ? card.dueDate.toISOString().slice(0, 10) : ""}
+                  className="rounded-md border bg-background px-2.5 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
+                />
+              </label>
+            )}
 
             <label className="flex flex-col gap-1.5 text-sm font-medium text-muted-foreground">
               List
@@ -2915,7 +2980,8 @@ function CreateCardModal({
             const form = event.currentTarget;
             const title = (form.elements.namedItem("title") as HTMLInputElement).value;
             const description = (form.elements.namedItem("description") as HTMLTextAreaElement).value;
-            const dueDate = (form.elements.namedItem("dueDate") as HTMLInputElement).value;
+            const dueDateInput = form.elements.namedItem("dueDate") as HTMLInputElement | null;
+            const dueDate = dueDateInput ? dueDateInput.value : "";
             const storyPointsInput = form.elements.namedItem("storyPoints") as HTMLInputElement | null;
             const storyPoints = storyPointsInput ? storyPointsInput.value : "";
             if (!title.trim()) return;
@@ -3021,17 +3087,19 @@ function CreateCardModal({
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            <label className="flex flex-col gap-1.5 text-sm font-medium text-muted-foreground">
-              <span className="flex items-center gap-1.5">
-                <Calendar className="h-3.5 w-3.5" />
-                Due date
-              </span>
-              <input
-                name="dueDate"
-                type="date"
-                className="rounded-md border bg-background px-2.5 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
-              />
-            </label>
+            {type !== "epic" && (
+              <label className="flex flex-col gap-1.5 text-sm font-medium text-muted-foreground">
+                <span className="flex items-center gap-1.5">
+                  <Calendar className="h-3.5 w-3.5" />
+                  Due date
+                </span>
+                <input
+                  name="dueDate"
+                  type="date"
+                  className="rounded-md border bg-background px-2.5 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
+                />
+              </label>
+            )}
 
             {type === "backlog_item" && (
               <label className="flex flex-col gap-1.5 text-sm font-medium text-muted-foreground">

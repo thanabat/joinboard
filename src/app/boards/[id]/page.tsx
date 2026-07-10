@@ -7,6 +7,7 @@ import Link from "next/link";
 import { displayName } from "@/lib/displayName";
 import { Board } from "./Board";
 import { BoardTabs } from "./BoardTabs";
+import { BoardTitle } from "./BoardTitle";
 
 export default async function BoardPage({
   params,
@@ -74,13 +75,15 @@ export default async function BoardPage({
       .filter((card) => card.listId === list.id)
       .map((card) => ({
         id: card.id,
+        number: card.number,
         title: card.title,
         description: card.description,
         dueDate: card.dueDate,
-        type: card.type as "task" | "backlog_item",
+        type: card.type as "task" | "backlog_item" | "epic",
         priority: card.priority as "high" | "medium" | "low",
         storyPoints: card.storyPoints,
         sprintId: card.sprintId,
+        epicId: card.epicId,
         labelIds: cardLabelRows
           .filter((row) => row.cardId === card.id)
           .map((row) => row.labelId),
@@ -214,7 +217,7 @@ export default async function BoardPage({
               ← Boards
             </Link>
             <span className="text-border">/</span>
-            <h1 className="text-lg font-semibold tracking-tight">{board.name}</h1>
+            <BoardTitle boardId={board.id} initialName={board.name} initialKey={board.key} isAdmin={isAdmin} />
           </div>
           <div className="flex items-center gap-3">
             <BoardTabs boardId={board.id} active="board" />
@@ -231,6 +234,7 @@ export default async function BoardPage({
       <main className="flex flex-1 flex-col gap-4 px-6 py-6">
         <Board
           boardId={board.id}
+          boardKey={board.key}
           initialLists={initialLists}
           initialLabels={boardLabels}
           isAdmin={isAdmin}

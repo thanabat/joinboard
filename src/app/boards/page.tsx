@@ -131,7 +131,12 @@ export default async function BoardsPage() {
                     href={`/boards/${board.id}`}
                     className="flex h-24 flex-col justify-between rounded-lg border bg-card p-3.5 shadow-xs transition hover:shadow-md hover:-translate-y-0.5"
                   >
-                    <span className="font-medium">{board.name}</span>
+                    <div className="flex flex-col gap-1">
+                      <span className="font-medium">{board.name}</span>
+                      <span className="w-fit rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] font-medium text-muted-foreground">
+                        {board.key}
+                      </span>
+                    </div>
                     <span className="text-xs text-muted-foreground">Open board →</span>
                   </Link>
                 </li>
@@ -150,7 +155,12 @@ export default async function BoardsPage() {
                     href={`/boards/${board.id}`}
                     className="flex h-24 flex-col justify-between rounded-lg border bg-card p-3.5 shadow-xs transition hover:shadow-md hover:-translate-y-0.5"
                   >
-                    <span className="font-medium">{board.name}</span>
+                    <div className="flex flex-col gap-1">
+                      <span className="font-medium">{board.name}</span>
+                      <span className="w-fit rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] font-medium text-muted-foreground">
+                        {board.key}
+                      </span>
+                    </div>
                     <span className="text-xs text-muted-foreground">Open board →</span>
                   </Link>
                 </li>
