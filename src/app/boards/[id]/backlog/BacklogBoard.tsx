@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import {
   ArrowDown,
   ArrowUp,
@@ -191,13 +192,21 @@ export function BacklogBoard({
               subtitle={`${activeSprint.startDate.toLocaleDateString("en-US")} – ${activeSprint.endDate.toLocaleDateString("en-US")}`}
               badge={{ label: "Active", className: "bg-accent-tint text-accent" }}
               action={
-                <button
-                  type="button"
-                  onClick={() => handleCompleteSprint(activeSprint.id)}
-                  className="cursor-pointer rounded-md border bg-card px-2.5 py-1 text-xs font-medium transition hover:bg-muted"
-                >
-                  Complete sprint
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <Link
+                    href={`/boards/${boardId}/sprints/${activeSprint.id}`}
+                    className="cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                  >
+                    View details
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => handleCompleteSprint(activeSprint.id)}
+                    className="cursor-pointer rounded-md border bg-card px-2.5 py-1 text-xs font-medium transition hover:bg-muted"
+                  >
+                    Complete sprint
+                  </button>
+                </div>
               }
               summary={`${doneCount}/${groupCards.length} cards done${totalPoints > 0 ? ` · ${donePoints}/${totalPoints} points` : ""}`}
               typeCounts={typeCounts}
@@ -220,15 +229,23 @@ export function BacklogBoard({
             subtitle={`${sprint.startDate.toLocaleDateString("en-US")} – ${sprint.endDate.toLocaleDateString("en-US")}`}
             badge={{ label: "Planned", className: "bg-muted text-muted-foreground" }}
             action={
-              !activeSprint && (
-                <button
-                  type="button"
-                  onClick={() => handleStartSprint(sprint.id)}
-                  className="cursor-pointer rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground shadow-sm transition hover:bg-primary-hover active:scale-[0.98]"
+              <div className="flex items-center gap-1.5">
+                <Link
+                  href={`/boards/${boardId}/sprints/${sprint.id}`}
+                  className="cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground"
                 >
-                  Start sprint
-                </button>
-              )
+                  View details
+                </Link>
+                {!activeSprint && (
+                  <button
+                    type="button"
+                    onClick={() => handleStartSprint(sprint.id)}
+                    className="cursor-pointer rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground shadow-sm transition hover:bg-primary-hover active:scale-[0.98]"
+                  >
+                    Start sprint
+                  </button>
+                )}
+              </div>
             }
             summary={`${doneCount}/${groupCards.length} cards done${totalPoints > 0 ? ` · ${donePoints}/${totalPoints} points` : ""}`}
             typeCounts={typeCounts}
@@ -285,6 +302,12 @@ export function BacklogBoard({
                   <span className="text-xs text-muted-foreground">
                     {doneCount}/{groupCards.length} done
                   </span>
+                  <Link
+                    href={`/boards/${boardId}/sprints/${sprint.id}`}
+                    className="shrink-0 cursor-pointer text-xs font-medium text-primary hover:underline"
+                  >
+                    View details
+                  </Link>
                 </li>
               );
             })}

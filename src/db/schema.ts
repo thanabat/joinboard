@@ -129,8 +129,24 @@ export const sprints = pgTable("sprint", {
   name: text("name").notNull(),
   startDate: timestamp("startDate", { mode: "date" }).notNull(),
   endDate: timestamp("endDate", { mode: "date" }).notNull(),
-  // "planned" | "active" | "completed" — a board has at most one non-completed sprint at a time.
+  // "planned" | "active" | "completed" — a board can have any number of
+  // planned sprints (planned ahead of time), but at most one active at once.
   status: text("status").notNull().default("planned"),
+  createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
+});
+
+export const sprintRetroItems = pgTable("sprintRetroItem", {
+  id: id(),
+  sprintId: text("sprintId")
+    .notNull()
+    .references(() => sprints.id, { onDelete: "cascade" }),
+  // "went_well" | "to_improve" | "action_items" — the three standard retro columns.
+  column: text("column").notNull(),
+  content: text("content").notNull(),
+  authorId: text("authorId")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  position: doublePrecision("position").notNull(),
   createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
 });
 

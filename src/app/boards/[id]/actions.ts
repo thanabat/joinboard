@@ -2,7 +2,7 @@
 
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { activities, boardMembers, boards, cardLabels, cardLinks, cardMembers, cards, checklistItems, comments, labels, lists, sprints, users } from "@/db/schema";
+import { activities, boardMembers, boards, cardLabels, cardLinks, cardMembers, cards, checklistItems, comments, labels, lists, sprintRetroItems, sprints, users } from "@/db/schema";
 import { and, eq, inArray, isNull, max, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { displayName } from "@/lib/displayName";
@@ -955,6 +955,69 @@ export async function setCardSprint(cardId: string, sprintId: string | null) {
     : `removed card "${card.title}" from the sprint`;
   const activity = await logActivity(list.boardId, userId, cardId, message, "card");
   revalidatePath(`/boards/${list.boardId}`);
+  return { activity };
+}
+
+async function requireSprintAccess(sprintId: string) {
+  const sprint = await db.query.sprints.findFirst({ where: eq(sprints.id, sprintId) });
+  if (!sprint) throw new Error("Sprint not found");
+  const { board, userId } = await requireBoardAccess(sprint.boardId);
+  return { sprint, board, userId };
+}
+
+const RETRO_COLUMNS = ["went_well", "to_improve", "action_items"] as const;
+
+export async function createRetroItem(sprintId: string, column: string, content: string) {
+  const { sprint, board, userId } = await requireSprintAccess(sprintId);
+  if (sprint.status !== "completed") {
+    throw new Error("Retrospective notes can only be added once the sprint is completed");
+  }
+  if (!RETRO_COLUMNS.includes(column as (typeof RETRO_COLUMNS)[number])) throw new Error("Invalid column");
+
+  const trimmed = content.trim();
+  if (!trimmed) throw new Error("Content is required");
+
+  const [{ maxPosition }] = await db
+    .select({ maxPosition: max(sprintRetroItems.position) })
+    .from(sprintRetroItems)
+    .where(and(eq(sprintRetroItems.sprintId, sprintId), eq(sprintRetroItems.column, column)));
+
+  const [item] = await db
+    .insert(sprintRetroItems)
+    .values({ sprintId, column, content: trimmed, authorId: userId, position: (maxPosition ?? 0) + 1 })
+    .returning();
+
+  const author = await db.query.users.findFirst({ where: eq(users.id, userId) });
+
+  const activity = await logActivity(
+    board.id,
+    userId,
+    null,
+    `added a retro note to sprint "${sprint.name}"`,
+    "global",
+  );
+  revalidatePath(`/boards/${board.id}/sprints/${sprintId}`);
+  return { item: { ...item, authorName: author ? displayName(author) : "(unknown)" }, activity };
+}
+
+export async function deleteRetroItem(itemId: string) {
+  const item = await db.query.sprintRetroItems.findFirst({ where: eq(sprintRetroItems.id, itemId) });
+  if (!item) throw new Error("Retro item not found");
+  const { sprint, board, userId } = await requireSprintAccess(item.sprintId);
+  if (sprint.status !== "completed") {
+    throw new Error("Retrospective notes can only be removed once the sprint is completed");
+  }
+
+  await db.delete(sprintRetroItems).where(eq(sprintRetroItems.id, itemId));
+
+  const activity = await logActivity(
+    board.id,
+    userId,
+    null,
+    `removed a retro note from sprint "${sprint.name}"`,
+    "global",
+  );
+  revalidatePath(`/boards/${board.id}/sprints/${sprint.id}`);
   return { activity };
 }
 
