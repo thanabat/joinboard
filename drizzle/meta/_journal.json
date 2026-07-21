@@ -134,6 +134,13 @@
       "when": 1783680313968,
       "tag": "0018_melted_victor_mancha",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1784535859369,
+      "tag": "0019_curvy_micromax",
+      "breakpoints": true
     }
   ]
 }

@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { useRouter } from "next/navigation";
 import { Pencil } from "lucide-react";
-import { updateBoard } from "./actions";
+import { archiveBoard, updateBoard } from "./actions";
 
 export function BoardTitle({
   boardId,
@@ -19,6 +20,7 @@ export function BoardTitle({
   const [name, setName] = useState(initialName);
   const [key, setKey] = useState(initialKey);
   const [showEdit, setShowEdit] = useState(false);
+  const router = useRouter();
 
   async function handleSave(nextName: string, nextKey: string) {
     try {
@@ -28,6 +30,16 @@ export function BoardTitle({
       setShowEdit(false);
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "Couldn't update board");
+    }
+  }
+
+  async function handleArchive() {
+    if (!window.confirm(`Archive "${name}"? You can restore it later from the boards list.`)) return;
+    try {
+      await archiveBoard(boardId);
+      router.push("/boards");
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Couldn't archive board");
     }
   }
 
@@ -55,6 +67,7 @@ export function BoardTitle({
             boardKey={key}
             onClose={() => setShowEdit(false)}
             onSave={handleSave}
+            onArchive={handleArchive}
           />,
           document.body,
         )}
@@ -67,11 +80,13 @@ function EditBoardModal({
   boardKey,
   onClose,
   onSave,
+  onArchive,
 }: {
   name: string;
   boardKey: string;
   onClose: () => void;
   onSave: (name: string, key: string) => void;
+  onArchive: () => void;
 }) {
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -130,20 +145,29 @@ function EditBoardModal({
             </span>
           </label>
 
-          <div className="flex items-center justify-end gap-2 border-t pt-4">
+          <div className="flex items-center justify-between gap-2 border-t pt-4">
             <button
               type="button"
-              onClick={onClose}
-              className="cursor-pointer rounded-md border bg-card px-3.5 py-1.5 text-sm font-medium transition hover:bg-muted"
+              onClick={onArchive}
+              className="cursor-pointer rounded-md px-3.5 py-1.5 text-sm font-medium text-destructive transition hover:bg-destructive/10"
             >
-              Cancel
+              Archive board
             </button>
-            <button
-              type="submit"
-              className="cursor-pointer rounded-md bg-primary px-3.5 py-1.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:bg-primary-hover active:scale-[0.98]"
-            >
-              Save
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="cursor-pointer rounded-md border bg-card px-3.5 py-1.5 text-sm font-medium transition hover:bg-muted"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="cursor-pointer rounded-md bg-primary px-3.5 py-1.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:bg-primary-hover active:scale-[0.98]"
+              >
+                Save
+              </button>
+            </div>
           </div>
         </form>
       </div>

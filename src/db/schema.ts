@@ -89,6 +89,10 @@ export const boards = pgTable("board", {
   // Short reference key auto-derived from the board name (e.g. "DEV"), so
   // cards can be referenced as "DEV-42". Globally unique.
   key: text("key").notNull().unique(),
+  // Set when the board is archived (hidden from board lists, but not
+  // deleted). Null means active. A board must be archived before it can be
+  // permanently deleted.
+  archivedAt: timestamp("archivedAt", { mode: "date" }),
 });
 
 export const boardMembers = pgTable(

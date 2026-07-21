@@ -99,17 +99,18 @@ export async function createCard(
     storyPoints: number | null;
   },
 ) {
-  const list = await db.query.lists.findFirst({ where: eq(lists.id, listId) });
+  // The list lookup and the position query are independent of each other
+  // (both only need the listId param), so batch them into one round trip.
+  const [list, [maxPositionRow]] = await db.batch([
+    db.query.lists.findFirst({ where: eq(lists.id, listId) }),
+    db.select({ maxPosition: max(cards.position) }).from(cards).where(eq(cards.listId, listId)),
+  ]);
   if (!list) throw new Error("List not found");
+  const { maxPosition } = maxPositionRow;
   const { userId } = await requireBoardAccess(list.boardId);
 
   const trimmed = details.title.trim();
   if (!trimmed) throw new Error("Title is required");
-
-  const [{ maxPosition }] = await db
-    .select({ maxPosition: max(cards.position) })
-    .from(cards)
-    .where(eq(cards.listId, listId));
 
   const [{ maxNumber }] = await db
     .select({ maxNumber: max(cards.number) })
@@ -217,15 +218,18 @@ export async function deleteCard(cardId: string) {
 }
 
 export async function moveCard(cardId: string, targetListId: string) {
-  const { card, list: currentList, userId } = await requireCardAccess(cardId);
-  const { list: targetList, board } = await requireListAccess(targetListId);
-
+  // requireCardAccess already verified the current board, so re-resolving
+  // access for the target list would just re-check the same board (cross-
+  // board moves are rejected below anyway) — a plain lookup plus the
+  // position query are independent, so batch them into one round trip.
+  const { card, list: currentList, board, userId } = await requireCardAccess(cardId);
+  const [targetList, [maxPositionRow]] = await db.batch([
+    db.query.lists.findFirst({ where: eq(lists.id, targetListId) }),
+    db.select({ maxPosition: max(cards.position) }).from(cards).where(eq(cards.listId, targetListId)),
+  ]);
+  if (!targetList) throw new Error("List not found");
   if (currentList.boardId !== targetList.boardId) throw new Error("List not found");
-
-  const [{ maxPosition }] = await db
-    .select({ maxPosition: max(cards.position) })
-    .from(cards)
-    .where(eq(cards.listId, targetListId));
+  const { maxPosition } = maxPositionRow;
 
   await db
     .update(cards)
@@ -623,23 +627,27 @@ export async function reorderCards(
 ) {
   const { userId } = await requireBoardAccess(boardId);
 
-  // Defense in depth: only allow writing cards into lists that belong to this board.
+  // Defense in depth: only allow writing cards into lists that belong to this
+  // board. This lookup and the affected-cards lookup below are independent
+  // of each other (neither needs the other's result), so batch them.
   const listIds = [...new Set(updates.map((update) => update.listId))];
-  const validLists = await db.query.lists.findMany({
-    where: and(eq(lists.boardId, boardId), inArray(lists.id, listIds)),
-  });
+  const [validLists, affectedCards] = await db.batch([
+    db.query.lists.findMany({
+      where: and(eq(lists.boardId, boardId), inArray(lists.id, listIds)),
+    }),
+    db.query.cards.findMany({
+      where: inArray(
+        cards.id,
+        updates.map((update) => update.id),
+      ),
+    }),
+  ]);
   const validListIds = new Set(validLists.map((list) => list.id));
   if (updates.some((update) => !validListIds.has(update.listId))) {
     throw new Error("Invalid list");
   }
 
   // Detect a genuine cross-list drag (as opposed to same-list reordering) to log it.
-  const affectedCards = await db.query.cards.findMany({
-    where: inArray(
-      cards.id,
-      updates.map((update) => update.id),
-    ),
-  });
   const moved = updates
     .map((update) => ({ update, card: affectedCards.find((card) => card.id === update.id) }))
     .find(({ update, card }) => card && card.listId !== update.listId);
@@ -856,6 +864,34 @@ export async function updateBoard(boardId: string, name: string, key: string) {
   revalidatePath(`/boards/${boardId}`);
   revalidatePath("/boards");
   return { activity, name: trimmedName, key: normalizedKey };
+}
+
+export async function archiveBoard(boardId: string) {
+  const { board, userId } = await requireBoardAdmin(boardId);
+  await db.update(boards).set({ archivedAt: new Date() }).where(eq(boards.id, boardId));
+  const activity = await logActivity(boardId, userId, null, `archived board "${board.name}"`, "global");
+  revalidatePath(`/boards/${boardId}`);
+  revalidatePath("/boards");
+  return { activity };
+}
+
+export async function unarchiveBoard(boardId: string) {
+  const { board, userId } = await requireBoardAdmin(boardId);
+  await db.update(boards).set({ archivedAt: null }).where(eq(boards.id, boardId));
+  const activity = await logActivity(boardId, userId, null, `restored board "${board.name}" from archive`, "global");
+  revalidatePath(`/boards/${boardId}`);
+  revalidatePath("/boards");
+  return { activity };
+}
+
+export async function deleteBoard(boardId: string, confirmName: string) {
+  const { board } = await requireBoardAdmin(boardId);
+  if (!board.archivedAt) throw new Error("Archive the board before deleting it permanently");
+  if (confirmName.trim() !== board.name) throw new Error("That doesn't match the board's name");
+
+  // Cascades to lists/cards/labels/sprints/activities/etc. via their FKs.
+  await db.delete(boards).where(eq(boards.id, boardId));
+  revalidatePath("/boards");
 }
 
 // --- Shareable invite link (separate from the by-email invite above — no

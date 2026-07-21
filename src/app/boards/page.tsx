@@ -1,17 +1,18 @@
 import { auth, signOut } from "@/auth";
 import { db } from "@/db";
-import { boardMembers, boards } from "@/db/schema";
-import { eq, inArray } from "drizzle-orm";
+import { boardMembers, boards, cards, lists } from "@/db/schema";
+import { eq, inArray, and, isNull, isNotNull } from "drizzle-orm";
 import Link from "next/link";
 import { createBoard } from "./actions";
 import { acceptInvite, declineInvite } from "./[id]/actions";
+import { ArchivedBoardsSection } from "./ArchivedBoardsSection";
 
 export default async function BoardsPage() {
   const session = await auth();
   const userId = session!.user!.id;
 
   const myBoards = await db.query.boards.findMany({
-    where: eq(boards.ownerId, userId),
+    where: and(eq(boards.ownerId, userId), isNull(boards.archivedAt)),
     orderBy: (board, { desc }) => desc(board.createdAt),
   });
 
@@ -25,11 +26,39 @@ export default async function BoardsPage() {
   const activeBoardIds = memberships.filter((m) => m.status === "active").map((m) => m.boardId);
 
   const invitedBoards = invitedBoardIds.length
-    ? await db.query.boards.findMany({ where: inArray(boards.id, invitedBoardIds) })
+    ? await db.query.boards.findMany({
+        where: and(inArray(boards.id, invitedBoardIds), isNull(boards.archivedAt)),
+      })
     : [];
   const sharedBoards = activeBoardIds.length
-    ? await db.query.boards.findMany({ where: inArray(boards.id, activeBoardIds) })
+    ? await db.query.boards.findMany({
+        where: and(inArray(boards.id, activeBoardIds), isNull(boards.archivedAt)),
+      })
     : [];
+
+  const archivedOwnedBoards = await db.query.boards.findMany({
+    where: and(eq(boards.ownerId, userId), isNotNull(boards.archivedAt)),
+    orderBy: (board, { desc }) => desc(board.archivedAt),
+  });
+  const archivedBoardIds = archivedOwnedBoards.map((board) => board.id);
+  const archivedBoardLists = archivedBoardIds.length
+    ? await db.query.lists.findMany({ where: inArray(lists.boardId, archivedBoardIds) })
+    : [];
+  const archivedListIds = archivedBoardLists.map((list) => list.id);
+  const archivedBoardCards = archivedListIds.length
+    ? await db.query.cards.findMany({ where: inArray(cards.listId, archivedListIds) })
+    : [];
+  const archivedBoards = archivedOwnedBoards.map((board) => {
+    const boardListIds = archivedBoardLists.filter((list) => list.boardId === board.id).map((list) => list.id);
+    return {
+      id: board.id,
+      name: board.name,
+      key: board.key,
+      archivedAt: board.archivedAt!,
+      listCount: boardListIds.length,
+      cardCount: archivedBoardCards.filter((card) => boardListIds.includes(card.listId)).length,
+    };
+  });
 
   return (
     <div className="flex flex-1 flex-col">
@@ -168,6 +197,8 @@ export default async function BoardsPage() {
             </ul>
           </section>
         )}
+
+        {archivedBoards.length > 0 && <ArchivedBoardsSection boards={archivedBoards} />}
       </main>
     </div>
   );
